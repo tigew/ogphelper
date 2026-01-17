@@ -15,7 +15,7 @@ A Python-based scheduling tool that creates optimized daily schedules for 1-80 a
 
 ```bash
 # Clone the repository
-git clone <repository-url>
+git clone https://github.com/tigew/ogphelper
 cd ogphelper
 
 # Install in development mode
