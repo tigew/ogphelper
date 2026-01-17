@@ -5,15 +5,20 @@ Every generated schedule should pass validation before being output.
 """
 
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 from enum import Enum
 from typing import Optional
 
 from ogphelper.domain.models import (
     Associate,
     DaySchedule,
+    DaysOffPattern,
+    FairnessConfig,
     JobRole,
     ScheduleRequest,
     ShiftAssignment,
+    WeeklySchedule,
+    WeeklyScheduleRequest,
 )
 from ogphelper.domain.policies import (
     BreakPolicy,
@@ -28,6 +33,7 @@ from ogphelper.domain.policies import (
 class ValidationErrorType(Enum):
     """Types of validation errors."""
 
+    # Daily validation errors
     SHIFT_OUTSIDE_DAY = "shift_outside_day"
     SHIFT_OUTSIDE_AVAILABILITY = "shift_outside_availability"
     WORK_TIME_TOO_SHORT = "work_time_too_short"
@@ -45,6 +51,13 @@ class ValidationErrorType(Enum):
     BREAK_OVERLAPS_LUNCH = "break_overlaps_lunch"
     BREAKS_OVERLAP = "breaks_overlap"
     NO_JOB_ASSIGNMENT = "no_job_assignment"
+
+    # Weekly validation errors
+    INSUFFICIENT_DAYS_OFF = "insufficient_days_off"
+    DAYS_OFF_PATTERN_VIOLATED = "days_off_pattern_violated"
+    MIN_WEEKLY_HOURS_NOT_MET = "min_weekly_hours_not_met"
+    FAIRNESS_THRESHOLD_EXCEEDED = "fairness_threshold_exceeded"
+    CONSECUTIVE_WORK_DAYS_EXCEEDED = "consecutive_work_days_exceeded"
 
 
 @dataclass
@@ -481,3 +494,283 @@ class ScheduleValidator:
                 )
 
         return result
+
+    def validate_weekly_schedule(
+        self,
+        weekly_schedule: WeeklySchedule,
+        request: WeeklyScheduleRequest,
+        associates_map: dict[str, Associate],
+    ) -> ValidationResult:
+        """Validate a complete weekly schedule.
+
+        This performs comprehensive validation including:
+        - Daily validation for each day
+        - Weekly hour limits
+        - Days-off patterns
+        - Fairness constraints
+
+        Args:
+            weekly_schedule: The weekly schedule to validate.
+            request: Original weekly request with constraints.
+            associates_map: Dict mapping associate IDs to Associate objects.
+
+        Returns:
+            ValidationResult with all errors and warnings.
+        """
+        result = ValidationResult(is_valid=True)
+
+        # Validate each daily schedule
+        for schedule_date, day_schedule in weekly_schedule.day_schedules.items():
+            day_request = request.create_day_request(schedule_date)
+            day_result = self.validate(day_schedule, day_request, associates_map)
+
+            # Merge errors and warnings
+            for error in day_result.errors:
+                error.details["date"] = schedule_date.isoformat()
+                result.add_error(error)
+            for warning in day_result.warnings:
+                result.add_warning(f"{schedule_date}: {warning}")
+
+        # Validate weekly hour limits
+        self._validate_weekly_hour_limits(
+            weekly_schedule, associates_map, result
+        )
+
+        # Validate minimum weekly hours
+        self._validate_min_weekly_hours(
+            weekly_schedule, request, associates_map, result
+        )
+
+        # Validate days-off requirements
+        self._validate_days_off(
+            weekly_schedule, request, associates_map, result
+        )
+
+        # Validate days-off pattern
+        self._validate_days_off_pattern(
+            weekly_schedule, request, associates_map, result
+        )
+
+        # Validate fairness
+        self._validate_fairness(
+            weekly_schedule, request, associates_map, result
+        )
+
+        return result
+
+    def _validate_weekly_hour_limits(
+        self,
+        schedule: WeeklySchedule,
+        associates_map: dict[str, Associate],
+        result: ValidationResult,
+    ) -> None:
+        """Validate weekly hour limits for all associates."""
+        for assoc_id, associate in associates_map.items():
+            total_minutes = schedule.get_associate_weekly_minutes(assoc_id)
+
+            if total_minutes > associate.max_minutes_per_week:
+                result.add_error(
+                    ValidationError(
+                        error_type=ValidationErrorType.MAX_WEEKLY_HOURS_EXCEEDED,
+                        message=(
+                            f"Weekly work time {total_minutes} min exceeds "
+                            f"max {associate.max_minutes_per_week} min"
+                        ),
+                        associate_id=assoc_id,
+                        details={
+                            "total_minutes": total_minutes,
+                            "max_minutes": associate.max_minutes_per_week,
+                        },
+                    )
+                )
+
+    def _validate_min_weekly_hours(
+        self,
+        schedule: WeeklySchedule,
+        request: WeeklyScheduleRequest,
+        associates_map: dict[str, Associate],
+        result: ValidationResult,
+    ) -> None:
+        """Validate minimum weekly hour requirements."""
+        min_minutes = request.fairness_config.min_weekly_minutes
+
+        if min_minutes <= 0:
+            return
+
+        for assoc_id in associates_map:
+            total_minutes = schedule.get_associate_weekly_minutes(assoc_id)
+
+            # Check if associate was available at all
+            available_days = sum(
+                1 for d in schedule.schedule_dates
+                if not associates_map[assoc_id].get_availability(d).is_off
+            )
+
+            if available_days > 0 and total_minutes < min_minutes:
+                result.add_warning(
+                    f"Associate {assoc_id} has only {total_minutes} min "
+                    f"scheduled (minimum target: {min_minutes} min)"
+                )
+
+    def _validate_days_off(
+        self,
+        schedule: WeeklySchedule,
+        request: WeeklyScheduleRequest,
+        associates_map: dict[str, Associate],
+        result: ValidationResult,
+    ) -> None:
+        """Validate minimum days-off requirements."""
+        required_off = request.required_days_off
+        total_days = request.num_days
+
+        for assoc_id in associates_map:
+            days_worked = schedule.get_associate_days_worked(assoc_id)
+            days_off = total_days - days_worked
+
+            if days_off < required_off:
+                result.add_error(
+                    ValidationError(
+                        error_type=ValidationErrorType.INSUFFICIENT_DAYS_OFF,
+                        message=(
+                            f"Has {days_off} days off, requires {required_off}"
+                        ),
+                        associate_id=assoc_id,
+                        details={
+                            "days_off": days_off,
+                            "required": required_off,
+                            "days_worked": days_worked,
+                        },
+                    )
+                )
+
+    def _validate_days_off_pattern(
+        self,
+        schedule: WeeklySchedule,
+        request: WeeklyScheduleRequest,
+        associates_map: dict[str, Associate],
+        result: ValidationResult,
+    ) -> None:
+        """Validate days-off pattern compliance."""
+        pattern = request.days_off_pattern
+
+        if pattern == DaysOffPattern.NONE:
+            return
+
+        for assoc_id in associates_map:
+            days_off = schedule.get_associate_days_off(assoc_id)
+
+            if pattern == DaysOffPattern.TWO_CONSECUTIVE:
+                if not self._has_consecutive_days_off(days_off, 2):
+                    result.add_error(
+                        ValidationError(
+                            error_type=ValidationErrorType.DAYS_OFF_PATTERN_VIOLATED,
+                            message="Does not have 2 consecutive days off",
+                            associate_id=assoc_id,
+                            details={
+                                "pattern": pattern.value,
+                                "days_off": [d.isoformat() for d in days_off],
+                            },
+                        )
+                    )
+
+            elif pattern == DaysOffPattern.ONE_WEEKEND_DAY:
+                has_weekend_off = any(d.weekday() >= 5 for d in days_off)
+                if not has_weekend_off:
+                    result.add_error(
+                        ValidationError(
+                            error_type=ValidationErrorType.DAYS_OFF_PATTERN_VIOLATED,
+                            message="Does not have a weekend day off",
+                            associate_id=assoc_id,
+                            details={
+                                "pattern": pattern.value,
+                                "days_off": [d.isoformat() for d in days_off],
+                            },
+                        )
+                    )
+
+            elif pattern == DaysOffPattern.EVERY_OTHER_DAY:
+                # Check for consecutive work days
+                days_worked = [
+                    d for d in schedule.schedule_dates
+                    if d not in days_off
+                ]
+                if self._has_consecutive_days(days_worked):
+                    result.add_error(
+                        ValidationError(
+                            error_type=ValidationErrorType.CONSECUTIVE_WORK_DAYS_EXCEEDED,
+                            message="Has consecutive work days",
+                            associate_id=assoc_id,
+                            details={
+                                "pattern": pattern.value,
+                                "days_worked": [d.isoformat() for d in days_worked],
+                            },
+                        )
+                    )
+
+    def _has_consecutive_days_off(
+        self,
+        days_off: list[date],
+        required_consecutive: int,
+    ) -> bool:
+        """Check if there are the required number of consecutive days off."""
+        if len(days_off) < required_consecutive:
+            return False
+
+        sorted_days = sorted(days_off)
+        consecutive = 1
+
+        for i in range(1, len(sorted_days)):
+            if (sorted_days[i] - sorted_days[i - 1]).days == 1:
+                consecutive += 1
+                if consecutive >= required_consecutive:
+                    return True
+            else:
+                consecutive = 1
+
+        return False
+
+    def _has_consecutive_days(self, days: list[date]) -> bool:
+        """Check if any two days in the list are consecutive."""
+        if len(days) < 2:
+            return False
+
+        sorted_days = sorted(days)
+        for i in range(1, len(sorted_days)):
+            if (sorted_days[i] - sorted_days[i - 1]).days == 1:
+                return True
+
+        return False
+
+    def _validate_fairness(
+        self,
+        schedule: WeeklySchedule,
+        request: WeeklyScheduleRequest,
+        associates_map: dict[str, Associate],
+        result: ValidationResult,
+    ) -> None:
+        """Validate fairness constraints."""
+        if not schedule.fairness_metrics:
+            return
+
+        config = request.fairness_config
+        metrics = schedule.fairness_metrics
+
+        # Check hours variance threshold
+        max_variance = config.max_hours_variance
+        actual_variance = metrics.max_hours - metrics.min_hours
+
+        if actual_variance > max_variance / 60.0:  # Convert minutes to hours
+            result.add_warning(
+                f"Hours variance ({actual_variance:.1f}h) exceeds threshold "
+                f"({max_variance / 60.0:.1f}h). "
+                f"Min: {metrics.min_hours:.1f}h, Max: {metrics.max_hours:.1f}h"
+            )
+
+        # Flag associates significantly below average
+        if metrics.avg_hours > 0:
+            for assoc_id, hours in metrics.hours_per_associate.items():
+                if hours < metrics.avg_hours * 0.5:
+                    result.add_warning(
+                        f"Associate {assoc_id} has significantly fewer hours "
+                        f"({hours:.1f}h) than average ({metrics.avg_hours:.1f}h)"
+                    )
