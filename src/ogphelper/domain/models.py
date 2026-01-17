@@ -10,6 +10,20 @@ from enum import Enum
 from typing import Optional
 
 
+class DaysOffPattern(Enum):
+    """Pattern for days off within a week.
+
+    These patterns define how rest days should be distributed
+    to ensure fair and healthy work schedules.
+    """
+
+    NONE = "none"  # No pattern enforced
+    TWO_CONSECUTIVE = "two_consecutive"  # 2 consecutive days off
+    ONE_WEEKEND_DAY = "one_weekend_day"  # At least 1 weekend day off
+    EVERY_OTHER_DAY = "every_other_day"  # Work every other day max
+    CUSTOM = "custom"  # Custom pattern defined elsewhere
+
+
 class JobRole(Enum):
     """Available job roles for associates."""
 
@@ -403,3 +417,250 @@ class DaySchedule:
         minutes = self.day_start_minutes + (slot * self.slot_minutes)
         hours, mins = divmod(minutes, 60)
         return time(hour=hours, minute=mins)
+
+
+@dataclass
+class FairnessConfig:
+    """Configuration for fairness balancing in weekly scheduling.
+
+    Attributes:
+        target_weekly_minutes: Target work minutes per week per associate (None = use max).
+        min_weekly_minutes: Minimum work minutes per week (default 0).
+        max_hours_variance: Maximum allowed variance in hours between associates.
+        balance_daily_starts: Whether to vary shift start times day-to-day.
+        prefer_consistent_shifts: Whether to prefer similar shift patterns.
+        weight_hours_balance: Weight for hours balancing in scoring (0-1).
+        weight_days_balance: Weight for days worked balancing in scoring (0-1).
+    """
+
+    target_weekly_minutes: Optional[int] = None
+    min_weekly_minutes: int = 0
+    max_hours_variance: float = 120.0  # 2 hours variance allowed
+    balance_daily_starts: bool = True
+    prefer_consistent_shifts: bool = False
+    weight_hours_balance: float = 0.7
+    weight_days_balance: float = 0.3
+
+
+@dataclass
+class WeeklyScheduleRequest:
+    """Request parameters for generating a weekly schedule.
+
+    Attributes:
+        start_date: First date of the scheduling week.
+        end_date: Last date of the scheduling week (inclusive).
+        associates: List of associates to schedule.
+        day_start_minutes: Minutes from midnight when schedule day starts.
+        day_end_minutes: Minutes from midnight when schedule day ends.
+        slot_minutes: Duration of each time slot in minutes.
+        job_caps: Maximum associates per role per slot.
+        busy_days: Set of dates that are considered busy days.
+        days_off_pattern: Pattern for distributing days off.
+        required_days_off: Minimum number of days off per associate per week.
+        fairness_config: Configuration for fairness balancing.
+    """
+
+    start_date: date
+    end_date: date
+    associates: list[Associate]
+    day_start_minutes: int = 300  # 5:00 AM
+    day_end_minutes: int = 1320  # 10:00 PM
+    slot_minutes: int = 15
+    job_caps: dict[JobRole, int] = field(
+        default_factory=lambda: {
+            JobRole.PICKING: 999,
+            JobRole.GMD_SM: 2,
+            JobRole.EXCEPTION_SM: 2,
+            JobRole.STAGING: 2,
+            JobRole.BACKROOM: 8,
+        }
+    )
+    busy_days: set[date] = field(default_factory=set)
+    days_off_pattern: DaysOffPattern = DaysOffPattern.TWO_CONSECUTIVE
+    required_days_off: int = 2
+    fairness_config: FairnessConfig = field(default_factory=FairnessConfig)
+
+    @property
+    def total_slots_per_day(self) -> int:
+        """Total number of slots in each schedule day."""
+        return (self.day_end_minutes - self.day_start_minutes) // self.slot_minutes
+
+    @property
+    def schedule_dates(self) -> list[date]:
+        """List of all dates in the scheduling period."""
+        dates = []
+        current = self.start_date
+        while current <= self.end_date:
+            dates.append(current)
+            current += timedelta(days=1)
+        return dates
+
+    @property
+    def num_days(self) -> int:
+        """Number of days in the scheduling period."""
+        return (self.end_date - self.start_date).days + 1
+
+    def is_busy_day(self, d: date) -> bool:
+        """Check if a specific date is a busy day."""
+        return d in self.busy_days
+
+    def create_day_request(self, schedule_date: date) -> ScheduleRequest:
+        """Create a ScheduleRequest for a specific day."""
+        return ScheduleRequest(
+            schedule_date=schedule_date,
+            associates=self.associates,
+            day_start_minutes=self.day_start_minutes,
+            day_end_minutes=self.day_end_minutes,
+            slot_minutes=self.slot_minutes,
+            job_caps=self.job_caps,
+            is_busy_day=self.is_busy_day(schedule_date),
+        )
+
+
+@dataclass
+class FairnessMetrics:
+    """Metrics for evaluating schedule fairness.
+
+    Attributes:
+        hours_per_associate: Dict mapping associate ID to total work hours.
+        days_per_associate: Dict mapping associate ID to days worked.
+        avg_hours: Average hours across all associates.
+        hours_std_dev: Standard deviation of hours.
+        hours_variance: Variance in hours between associates.
+        min_hours: Minimum hours assigned to any associate.
+        max_hours: Maximum hours assigned to any associate.
+        fairness_score: Overall fairness score (0-100, higher is fairer).
+    """
+
+    hours_per_associate: dict[str, float] = field(default_factory=dict)
+    days_per_associate: dict[str, int] = field(default_factory=dict)
+    avg_hours: float = 0.0
+    hours_std_dev: float = 0.0
+    hours_variance: float = 0.0
+    min_hours: float = 0.0
+    max_hours: float = 0.0
+    fairness_score: float = 100.0
+
+    @classmethod
+    def calculate(
+        cls,
+        weekly_minutes: dict[str, int],
+        weekly_days: dict[str, int],
+    ) -> "FairnessMetrics":
+        """Calculate fairness metrics from weekly data."""
+        if not weekly_minutes:
+            return cls()
+
+        hours = {aid: mins / 60.0 for aid, mins in weekly_minutes.items()}
+        values = list(hours.values())
+
+        avg = sum(values) / len(values)
+        variance = sum((h - avg) ** 2 for h in values) / len(values)
+        std_dev = variance ** 0.5
+
+        # Fairness score: penalize high variance
+        # 100 = perfect (no variance), decreases as variance increases
+        max_acceptable_variance = 4.0  # 2 hours std dev
+        score = max(0.0, 100.0 - (std_dev / max_acceptable_variance) * 100.0)
+
+        return cls(
+            hours_per_associate=hours,
+            days_per_associate=weekly_days,
+            avg_hours=avg,
+            hours_std_dev=std_dev,
+            hours_variance=variance,
+            min_hours=min(values) if values else 0.0,
+            max_hours=max(values) if values else 0.0,
+            fairness_score=score,
+        )
+
+
+@dataclass
+class WeeklySchedule:
+    """Complete schedule output for a week.
+
+    Attributes:
+        start_date: First date of the schedule week.
+        end_date: Last date of the schedule week.
+        day_schedules: Dict mapping dates to DaySchedule objects.
+        fairness_metrics: Metrics about schedule fairness.
+    """
+
+    start_date: date
+    end_date: date
+    day_schedules: dict[date, DaySchedule] = field(default_factory=dict)
+    fairness_metrics: Optional[FairnessMetrics] = None
+
+    @property
+    def schedule_dates(self) -> list[date]:
+        """List of all dates in the schedule."""
+        dates = []
+        current = self.start_date
+        while current <= self.end_date:
+            dates.append(current)
+            current += timedelta(days=1)
+        return dates
+
+    @property
+    def num_days(self) -> int:
+        """Number of days in the schedule period."""
+        return (self.end_date - self.start_date).days + 1
+
+    def get_associate_weekly_minutes(self, associate_id: str) -> int:
+        """Get total work minutes for an associate across the week."""
+        total = 0
+        for day_schedule in self.day_schedules.values():
+            if associate_id in day_schedule.assignments:
+                total += day_schedule.assignments[associate_id].work_minutes
+        return total
+
+    def get_associate_days_worked(self, associate_id: str) -> int:
+        """Get number of days an associate is scheduled to work."""
+        count = 0
+        for day_schedule in self.day_schedules.values():
+            if associate_id in day_schedule.assignments:
+                count += 1
+        return count
+
+    def get_associate_days_off(self, associate_id: str) -> list[date]:
+        """Get list of dates when an associate is not scheduled."""
+        days_off = []
+        for d in self.schedule_dates:
+            if d in self.day_schedules:
+                if associate_id not in self.day_schedules[d].assignments:
+                    days_off.append(d)
+            else:
+                days_off.append(d)
+        return days_off
+
+    def get_total_coverage_by_day(self) -> dict[date, list[int]]:
+        """Get coverage timeline for each day."""
+        return {
+            d: schedule.get_coverage_timeline()
+            for d, schedule in self.day_schedules.items()
+        }
+
+    def get_weekly_summary(self) -> dict:
+        """Get summary statistics for the weekly schedule."""
+        total_work_minutes = 0
+        scheduled_shifts = 0
+        coverage_by_day = {}
+
+        for d, schedule in self.day_schedules.items():
+            day_work = sum(a.work_minutes for a in schedule.assignments.values())
+            total_work_minutes += day_work
+            scheduled_shifts += len(schedule.assignments)
+            timeline = schedule.get_coverage_timeline()
+            coverage_by_day[d] = {
+                "min": min(timeline) if timeline else 0,
+                "max": max(timeline) if timeline else 0,
+                "avg": sum(timeline) / len(timeline) if timeline else 0,
+            }
+
+        return {
+            "total_work_hours": total_work_minutes / 60.0,
+            "total_shifts": scheduled_shifts,
+            "days_scheduled": len(self.day_schedules),
+            "coverage_by_day": coverage_by_day,
+            "fairness_metrics": self.fairness_metrics,
+        }
