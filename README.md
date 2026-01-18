@@ -12,13 +12,13 @@ A Python-based scheduling tool that creates optimized daily and weekly schedules
 - **Validation Engine**: Single source of truth for all constraint checking
 - **PDF Output**: Generates printable schedules with timelines and summaries
 
-### Weekly Scheduling (Phase 2)
+### Weekly Scheduling
 - **Multi-Day Coordination**: Schedule across 7+ days with weekly hour tracking
 - **Fairness Balancing**: Equitable distribution of hours across associates
 - **Days-Off Patterns**: Enforce consecutive days off, weekend days, etc.
 - **Weekly Hour Limits**: Automatic enforcement of 40-hour week caps
 
-### Demand-Aware Optimization (Phase 3)
+### Demand-Aware Optimization
 - **Staffing Demand Curves**: Define target staffing levels by time slot
 - **OR-Tools CP-SAT Solver**: Optimal schedule generation using constraint programming
 - **Demand Matching**: Optimize schedules to match predicted demand
@@ -94,11 +94,11 @@ ogphelper demo --count 30
 # Generate PDF output
 ogphelper demo --count 20 --output schedule.pdf
 
-# Run weekly demo (Phase 2)
+# Run weekly demo
 ogphelper weekly-demo
 ogphelper weekly-demo --count 20 --days 5 --pattern two_consecutive
 
-# Run demand-aware demo (Phase 3)
+# Run demand-aware demo
 ogphelper demand-demo
 ogphelper demand-demo --solver cpsat --optimization match_demand
 ogphelper demand-demo --count 15 --profile high_volume --time-limit 60
@@ -165,14 +165,14 @@ src/ogphelper/
 ├── domain/                     # Data models and business rules
 │   ├── models.py               # Associate, TimeSlot, Schedule, etc.
 │   ├── policies.py             # Lunch, break, shift policies
-│   └── demand.py               # Demand curves and profiles (Phase 3)
+│   └── demand.py               # Demand curves and profiles
 ├── scheduling/                 # Schedule generation
 │   ├── candidate_generator.py  # Generate shift options
 │   ├── heuristic_solver.py     # Greedy optimization
 │   ├── scheduler.py            # Daily scheduling entry point
-│   ├── weekly_scheduler.py     # Weekly scheduling (Phase 2)
-│   ├── cpsat_solver.py         # OR-Tools CP-SAT solver (Phase 3)
-│   └── demand_aware_scheduler.py  # Demand-aware scheduling (Phase 3)
+│   ├── weekly_scheduler.py     # Weekly scheduling
+│   ├── cpsat_solver.py         # OR-Tools CP-SAT solver
+│   └── demand_aware_scheduler.py  # Demand-aware scheduling
 ├── validation/                 # Constraint checking
 │   └── validator.py            # Single source of truth
 ├── output/                     # Output generation
@@ -271,7 +271,7 @@ request = ScheduleRequest(
 )
 ```
 
-### Demand-Aware Scheduling (Phase 3)
+### Demand-Aware Scheduling
 
 ```python
 from datetime import date, timedelta
@@ -358,32 +358,7 @@ for d, metrics in result.demand_metrics.items():
 | `minimize_undercoverage` | Prioritize avoiding understaffing |
 | `balanced` | Balance all objectives (default) |
 
-## Roadmap
-
-### Phase 1: Daily Scheduling ✓
-- [x] Generate feasible shift options
-- [x] Maximize coverage with heuristic solver
-- [x] Place lunches and breaks optimally
-- [x] Assign roles with cap enforcement
-- [x] Full validation suite
-- [x] PDF output
-
-### Phase 2: Weekly Scheduling ✓
-- [x] Multi-day scheduling coordination
-- [x] Weekly hour enforcement (40-hour limit)
-- [x] Fairness balancing between associates
-- [x] Days-off patterns (consecutive, weekend, etc.)
-- [x] Weekly fairness metrics
-
-### Phase 3: Demand-Aware Optimization ✓
-- [x] Staffing demand curves (DemandCurve, DemandProfile)
-- [x] OR-Tools CP-SAT integration for optimal solving
-- [x] Demand matching optimization
-- [x] Demand metrics and reporting
-- [x] Multiple solver modes (heuristic, cpsat, hybrid)
-- [x] Demand profiles (weekday, weekend, high_volume)
-
-### Future Enhancements
+## Future Enhancements
 - [ ] Real-time schedule adjustments
 - [ ] Machine learning demand prediction
 - [ ] Multi-location scheduling

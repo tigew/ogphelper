@@ -23,7 +23,7 @@ __all__ = [
     # Core schedulers
     "Scheduler",
     "WeeklyScheduler",
-    # Demand-aware scheduling (Phase 3)
+    # Demand-aware scheduling
     "DemandAwareWeeklyScheduler",
     "DemandAwareConfig",
     "DemandAwareWeeklyResult",

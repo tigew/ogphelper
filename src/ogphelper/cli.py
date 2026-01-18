@@ -471,7 +471,7 @@ Examples:
   %(prog)s weekly-demo --days 5       Generate 5-day schedule
   %(prog)s weekly-demo --pattern none Disable days-off pattern
 
-  %(prog)s demand-demo                Run demand-aware demo (Phase 3)
+  %(prog)s demand-demo                Run demand-aware demo
   %(prog)s demand-demo --solver cpsat Use CP-SAT solver
   %(prog)s demand-demo --profile high_volume  High-volume demand
         """,
@@ -496,7 +496,7 @@ Examples:
     # Weekly demo command
     weekly_parser = subparsers.add_parser(
         "weekly-demo",
-        help="Run weekly demo schedule generation (Phase 2)"
+        help="Run weekly demo schedule generation"
     )
     weekly_parser.add_argument(
         "--count", "-c",
@@ -518,10 +518,10 @@ Examples:
         help="Days-off pattern (default: two_consecutive)",
     )
 
-    # Demand-aware demo command (Phase 3)
+    # Demand-aware demo command
     demand_parser = subparsers.add_parser(
         "demand-demo",
-        help="Run demand-aware schedule generation (Phase 3)"
+        help="Run demand-aware schedule generation"
     )
     demand_parser.add_argument(
         "--count", "-c",
