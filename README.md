@@ -1,15 +1,29 @@
 # OGP Helper - Workforce Scheduling Tool
 
-A Python-based scheduling tool that creates optimized daily schedules for 1-80 associates, maximizing on-floor coverage while respecting labor rules, role limits, availability, and capability restrictions.
+A Python-based scheduling tool that creates optimized daily and weekly schedules for 1-80 associates, maximizing on-floor coverage while respecting labor rules, role limits, availability, and capability restrictions.
 
 ## Features
 
+### Core Scheduling
 - **Smart Scheduling**: Generates optimized shift schedules that maximize floor coverage
 - **Policy-Based Rules**: Configurable lunch, break, and shift policies
 - **Role Management**: Supports multiple job roles with per-slot capacity limits
 - **Constraint Handling**: Respects associate availability, eligibility, and hour limits
 - **Validation Engine**: Single source of truth for all constraint checking
 - **PDF Output**: Generates printable schedules with timelines and summaries
+
+### Weekly Scheduling (Phase 2)
+- **Multi-Day Coordination**: Schedule across 7+ days with weekly hour tracking
+- **Fairness Balancing**: Equitable distribution of hours across associates
+- **Days-Off Patterns**: Enforce consecutive days off, weekend days, etc.
+- **Weekly Hour Limits**: Automatic enforcement of 40-hour week caps
+
+### Demand-Aware Optimization (Phase 3)
+- **Staffing Demand Curves**: Define target staffing levels by time slot
+- **OR-Tools CP-SAT Solver**: Optimal schedule generation using constraint programming
+- **Demand Matching**: Optimize schedules to match predicted demand
+- **Demand Profiles**: Reusable patterns for weekdays, weekends, high-volume days
+- **Demand Metrics**: Track how well schedules match demand
 
 ## Installation
 
@@ -71,7 +85,7 @@ if result.is_valid:
 ## Command Line Interface
 
 ```bash
-# Run demo with 10 associates
+# Run daily demo with 10 associates
 ogphelper demo
 
 # Run demo with 30 associates
@@ -79,6 +93,15 @@ ogphelper demo --count 30
 
 # Generate PDF output
 ogphelper demo --count 20 --output schedule.pdf
+
+# Run weekly demo (Phase 2)
+ogphelper weekly-demo
+ogphelper weekly-demo --count 20 --days 5 --pattern two_consecutive
+
+# Run demand-aware demo (Phase 3)
+ogphelper demand-demo
+ogphelper demand-demo --solver cpsat --optimization match_demand
+ogphelper demand-demo --count 15 --profile high_volume --time-limit 60
 ```
 
 ## Core Concepts
@@ -139,18 +162,22 @@ Each associate has:
 
 ```
 src/ogphelper/
-├── domain/           # Data models and business rules
-│   ├── models.py     # Associate, TimeSlot, Schedule, etc.
-│   └── policies.py   # Lunch, break, shift policies
-├── scheduling/       # Schedule generation
+├── domain/                     # Data models and business rules
+│   ├── models.py               # Associate, TimeSlot, Schedule, etc.
+│   ├── policies.py             # Lunch, break, shift policies
+│   └── demand.py               # Demand curves and profiles (Phase 3)
+├── scheduling/                 # Schedule generation
 │   ├── candidate_generator.py  # Generate shift options
 │   ├── heuristic_solver.py     # Greedy optimization
-│   └── scheduler.py            # Main entry point
-├── validation/       # Constraint checking
-│   └── validator.py  # Single source of truth
-├── output/           # Output generation
-│   └── pdf_generator.py  # PDF schedules
-└── cli.py            # Command-line interface
+│   ├── scheduler.py            # Daily scheduling entry point
+│   ├── weekly_scheduler.py     # Weekly scheduling (Phase 2)
+│   ├── cpsat_solver.py         # OR-Tools CP-SAT solver (Phase 3)
+│   └── demand_aware_scheduler.py  # Demand-aware scheduling (Phase 3)
+├── validation/                 # Constraint checking
+│   └── validator.py            # Single source of truth
+├── output/                     # Output generation
+│   └── pdf_generator.py        # PDF schedules
+└── cli.py                      # Command-line interface
 ```
 
 ## Scheduling Algorithm
@@ -244,9 +271,96 @@ request = ScheduleRequest(
 )
 ```
 
+### Demand-Aware Scheduling (Phase 3)
+
+```python
+from datetime import date, timedelta
+from ogphelper.domain.demand import DemandCurve, DemandProfile, WeeklyDemand
+from ogphelper.domain.models import WeeklyScheduleRequest, DaysOffPattern
+from ogphelper.scheduling import (
+    DemandAwareWeeklyScheduler,
+    DemandAwareConfig,
+    SolverType,
+    SolverConfig,
+    OptimizationMode,
+)
+
+# Create demand profiles
+weekday_profile = DemandProfile.create_weekday_profile()
+weekend_profile = DemandProfile.create_weekend_profile()
+
+# Create weekly demand with automatic weekday/weekend patterns
+start_date = date.today()
+weekly_demand = WeeklyDemand.create_standard_week(
+    start_date,
+    weekday_profile=weekday_profile,
+    weekend_profile=weekend_profile,
+)
+
+# Or create custom demand curves
+custom_curve = DemandCurve.create_default(
+    schedule_date=start_date,
+    base_demand=5,      # Base staffing level
+    peak_demand=12,     # Peak hour staffing
+    peak_hours=(10, 14), # Peak from 10 AM to 2 PM
+)
+
+# Configure the solver
+solver_config = SolverConfig(
+    time_limit_seconds=60.0,            # CP-SAT time limit
+    optimization_mode=OptimizationMode.BALANCED,  # Balance coverage and demand
+    demand_weight=40,                   # Weight for demand matching
+    coverage_weight=30,                 # Weight for coverage maximization
+)
+
+config = DemandAwareConfig(
+    solver_type=SolverType.HYBRID,      # Try CP-SAT, fall back to heuristic
+    solver_config=solver_config,
+    weekly_demand=weekly_demand,
+    track_demand_metrics=True,
+)
+
+# Create scheduler and generate
+scheduler = DemandAwareWeeklyScheduler(config=config)
+
+request = WeeklyScheduleRequest(
+    start_date=start_date,
+    end_date=start_date + timedelta(days=6),
+    associates=associates,
+    days_off_pattern=DaysOffPattern.TWO_CONSECUTIVE,
+)
+
+result = scheduler.generate_schedule(request, weekly_demand)
+
+# Access results
+print(f"Overall demand match: {result.overall_match_score:.1f}%")
+print(f"Fairness score: {result.schedule.fairness_metrics.fairness_score:.1f}")
+
+# Check daily demand metrics
+for d, metrics in result.demand_metrics.items():
+    print(f"{d}: {metrics.match_score:.1f}% match")
+```
+
+### Solver Options
+
+| Solver Type | Description | Best For |
+|-------------|-------------|----------|
+| `heuristic` | Fast greedy algorithm | Quick schedules, large teams |
+| `cpsat` | OR-Tools constraint programming | Optimal solutions, smaller teams |
+| `hybrid` | Try CP-SAT, fall back to heuristic | Balanced approach (default) |
+
+### Optimization Modes
+
+| Mode | Description |
+|------|-------------|
+| `maximize_coverage` | Maximize total on-floor coverage |
+| `match_demand` | Minimize difference from demand curve |
+| `minimize_undercoverage` | Prioritize avoiding understaffing |
+| `balanced` | Balance all objectives (default) |
+
 ## Roadmap
 
-### Phase 1: Daily Scheduling (Current)
+### Phase 1: Daily Scheduling ✓
 - [x] Generate feasible shift options
 - [x] Maximize coverage with heuristic solver
 - [x] Place lunches and breaks optimally
@@ -254,16 +368,26 @@ request = ScheduleRequest(
 - [x] Full validation suite
 - [x] PDF output
 
-### Phase 2: Weekly Scheduling
-- [ ] Multi-day scheduling
-- [ ] Weekly hour enforcement
-- [ ] Fairness balancing
-- [ ] Days-off patterns
+### Phase 2: Weekly Scheduling ✓
+- [x] Multi-day scheduling coordination
+- [x] Weekly hour enforcement (40-hour limit)
+- [x] Fairness balancing between associates
+- [x] Days-off patterns (consecutive, weekend, etc.)
+- [x] Weekly fairness metrics
 
-### Phase 3: Demand-Aware Optimization
-- [ ] Staffing demand curves
-- [ ] OR-Tools CP-SAT integration
-- [ ] Demand matching optimization
+### Phase 3: Demand-Aware Optimization ✓
+- [x] Staffing demand curves (DemandCurve, DemandProfile)
+- [x] OR-Tools CP-SAT integration for optimal solving
+- [x] Demand matching optimization
+- [x] Demand metrics and reporting
+- [x] Multiple solver modes (heuristic, cpsat, hybrid)
+- [x] Demand profiles (weekday, weekend, high_volume)
+
+### Future Enhancements
+- [ ] Real-time schedule adjustments
+- [ ] Machine learning demand prediction
+- [ ] Multi-location scheduling
+- [ ] Shift swapping and trade requests
 
 ## License
 

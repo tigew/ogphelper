@@ -1,9 +1,20 @@
 """Domain models and business rules for scheduling."""
 
+from ogphelper.domain.demand import (
+    DemandCurve,
+    DemandMetrics,
+    DemandPoint,
+    DemandPriority,
+    DemandProfile,
+    WeeklyDemand,
+)
 from ogphelper.domain.models import (
     Associate,
     Availability,
     DaySchedule,
+    DaysOffPattern,
+    FairnessConfig,
+    FairnessMetrics,
     JobAssignment,
     JobRole,
     Preference,
@@ -11,6 +22,8 @@ from ogphelper.domain.models import (
     ScheduleRequest,
     ShiftAssignment,
     TimeSlot,
+    WeeklySchedule,
+    WeeklyScheduleRequest,
 )
 from ogphelper.domain.policies import (
     BreakPolicy,
@@ -22,20 +35,34 @@ from ogphelper.domain.policies import (
 )
 
 __all__ = [
+    # Models
     "Associate",
     "Availability",
-    "BreakPolicy",
     "DaySchedule",
-    "DefaultBreakPolicy",
-    "DefaultLunchPolicy",
-    "DefaultShiftPolicy",
+    "DaysOffPattern",
+    "FairnessConfig",
+    "FairnessMetrics",
     "JobAssignment",
     "JobRole",
-    "LunchPolicy",
     "Preference",
     "ScheduleBlock",
     "ScheduleRequest",
     "ShiftAssignment",
-    "ShiftPolicy",
     "TimeSlot",
+    "WeeklySchedule",
+    "WeeklyScheduleRequest",
+    # Demand
+    "DemandCurve",
+    "DemandMetrics",
+    "DemandPoint",
+    "DemandPriority",
+    "DemandProfile",
+    "WeeklyDemand",
+    # Policies
+    "BreakPolicy",
+    "DefaultBreakPolicy",
+    "DefaultLunchPolicy",
+    "DefaultShiftPolicy",
+    "LunchPolicy",
+    "ShiftPolicy",
 ]
