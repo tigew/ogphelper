@@ -174,6 +174,7 @@ def run_weekly_demo(
     associate_count: int = 10,
     days: int = 7,
     days_off_pattern: str = "two_consecutive",
+    output_path: Optional[str] = None,
 ) -> None:
     """Run a weekly schedule generation demo.
 
@@ -181,6 +182,7 @@ def run_weekly_demo(
         associate_count: Number of associates to schedule.
         days: Number of days to schedule (default 7 for a week).
         days_off_pattern: Pattern for days off (none, two_consecutive, one_weekend_day).
+        output_path: Optional PDF file path for output.
     """
     print(f"Generating weekly schedule for {associate_count} associates over {days} days...")
 
@@ -287,6 +289,13 @@ def run_weekly_demo(
         print(f"  {associate.name} ({associate.id}): {days_worked} days, "
               f"{hours:.1f}h, off: {days_off_str}")
 
+    # Generate PDF if requested
+    if output_path:
+        print(f"\nGenerating PDF: {output_path}")
+        generator = PDFGenerator()
+        generator.generate_weekly(schedule, associates_map, output_path)
+        print("  PDF created successfully!")
+
 
 def run_demand_demo(
     associate_count: int = 10,
@@ -295,6 +304,7 @@ def run_demand_demo(
     optimization_mode: str = "balanced",
     time_limit: float = 30.0,
     demand_profile: str = "weekday",
+    output_path: Optional[str] = None,
 ) -> None:
     """Run a demand-aware schedule generation demo.
 
@@ -305,6 +315,7 @@ def run_demand_demo(
         optimization_mode: Optimization objective (maximize_coverage, match_demand, etc.).
         time_limit: CP-SAT solver time limit in seconds.
         demand_profile: Demand profile to use (weekday, weekend, high_volume).
+        output_path: Optional PDF file path for output.
     """
     print(f"Generating demand-aware schedule for {associate_count} associates over {days} days...")
     print(f"  Solver: {solver_type}, Optimization: {optimization_mode}")
@@ -454,6 +465,13 @@ def run_demand_demo(
         for error in validation_result.errors[:5]:
             print(f"    - {error}")
 
+    # Generate PDF if requested
+    if output_path:
+        print(f"\nGenerating PDF: {output_path}")
+        generator = PDFGenerator()
+        generator.generate_weekly(result.schedule, associates_map, output_path)
+        print("  PDF created successfully!")
+
 
 def main() -> int:
     """Main entry point for CLI."""
@@ -517,6 +535,11 @@ Examples:
         choices=["none", "two_consecutive", "one_weekend_day", "every_other_day"],
         help="Days-off pattern (default: two_consecutive)",
     )
+    weekly_parser.add_argument(
+        "--output", "-o",
+        type=str,
+        help="Output PDF file path",
+    )
 
     # Demand-aware demo command
     demand_parser = subparsers.add_parser(
@@ -562,6 +585,11 @@ Examples:
         choices=["weekday", "weekend", "high_volume"],
         help="Demand profile to use (default: weekday)",
     )
+    demand_parser.add_argument(
+        "--output", "-o",
+        type=str,
+        help="Output PDF file path",
+    )
 
     args = parser.parse_args()
 
@@ -569,7 +597,7 @@ Examples:
         run_demo(args.count, args.output)
         return 0
     elif args.command == "weekly-demo":
-        run_weekly_demo(args.count, args.days, args.pattern)
+        run_weekly_demo(args.count, args.days, args.pattern, args.output)
         return 0
     elif args.command == "demand-demo":
         run_demand_demo(
@@ -579,6 +607,7 @@ Examples:
             args.optimization,
             args.time_limit,
             args.profile,
+            args.output,
         )
         return 0
     else:

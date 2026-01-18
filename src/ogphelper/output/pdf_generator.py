@@ -16,6 +16,7 @@ from ogphelper.domain.models import (
     DaySchedule,
     JobRole,
     ShiftAssignment,
+    WeeklySchedule,
 )
 
 # Color definitions (RGB tuples, 0-1 scale)
@@ -126,6 +127,246 @@ class PDFGenerator:
         c.save()
         buffer.seek(0)
         return buffer
+
+    def generate_weekly(
+        self,
+        schedule: WeeklySchedule,
+        associates_map: dict[str, Associate],
+        output_path: Union[str, Path],
+        include_summary: bool = True,
+    ) -> None:
+        """Generate PDF for a weekly schedule and save to file.
+
+        Creates a multi-page PDF with:
+        - Individual day schedule pages (same visual fidelity as daily)
+        - Daily coverage timelines with associate assignments
+        - Weekly summary page with coverage across all days
+        - Fairness metrics and distribution charts
+
+        Args:
+            schedule: The weekly schedule to render.
+            associates_map: Dict mapping associate IDs to Associate objects.
+            output_path: Path to save the PDF.
+            include_summary: Whether to include weekly summary page.
+        """
+        try:
+            from reportlab.lib.pagesizes import letter, landscape
+            from reportlab.pdfgen import canvas
+        except ImportError:
+            raise ImportError(
+                "reportlab is required for PDF generation. "
+                "Install with: pip install reportlab"
+            )
+
+        c = canvas.Canvas(str(output_path), pagesize=landscape(letter))
+
+        # Generate pages for each day
+        for d in sorted(schedule.day_schedules.keys()):
+            day_schedule = schedule.day_schedules[d]
+            self._draw_schedule_pages(c, day_schedule, associates_map)
+
+        # Generate weekly summary page if requested
+        if include_summary:
+            self._draw_weekly_summary_page(c, schedule, associates_map)
+
+        c.save()
+
+    def generate_weekly_to_buffer(
+        self,
+        schedule: WeeklySchedule,
+        associates_map: dict[str, Associate],
+        include_summary: bool = True,
+    ) -> BytesIO:
+        """Generate weekly PDF and return as bytes buffer.
+
+        Args:
+            schedule: The weekly schedule to render.
+            associates_map: Dict mapping associate IDs to Associate objects.
+            include_summary: Whether to include weekly summary page.
+
+        Returns:
+            BytesIO buffer containing PDF data.
+        """
+        try:
+            from reportlab.lib.pagesizes import letter, landscape
+            from reportlab.pdfgen import canvas
+        except ImportError:
+            raise ImportError(
+                "reportlab is required for PDF generation. "
+                "Install with: pip install reportlab"
+            )
+
+        buffer = BytesIO()
+        c = canvas.Canvas(buffer, pagesize=landscape(letter))
+
+        # Generate pages for each day
+        for d in sorted(schedule.day_schedules.keys()):
+            day_schedule = schedule.day_schedules[d]
+            self._draw_schedule_pages(c, day_schedule, associates_map)
+
+        if include_summary:
+            self._draw_weekly_summary_page(c, schedule, associates_map)
+
+        c.save()
+        buffer.seek(0)
+        return buffer
+
+    def _draw_weekly_summary_page(
+        self,
+        c,
+        schedule: WeeklySchedule,
+        associates_map: dict[str, Associate],
+    ) -> None:
+        """Draw weekly summary page with coverage and fairness statistics."""
+        from reportlab.lib.units import inch
+
+        # Header
+        c.setFont("Helvetica-Bold", 16)
+        c.drawString(
+            self.margin,
+            self.page_height - self.margin - 20,
+            f"Weekly Schedule Summary - {schedule.start_date.strftime('%b %d')} to "
+            f"{schedule.end_date.strftime('%b %d, %Y')}",
+        )
+
+        y = self.page_height - self.margin - 60
+
+        # Weekly overview stats
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(self.margin, y, "Weekly Overview")
+        y -= 20
+
+        summary = schedule.get_weekly_summary()
+        c.setFont("Helvetica", 10)
+        stats = [
+            f"Total Days Scheduled: {summary['days_scheduled']}",
+            f"Total Shifts: {summary['total_shifts']}",
+            f"Total Work Hours: {summary['total_work_hours']:.1f}",
+        ]
+
+        for stat in stats:
+            c.drawString(self.margin + 20, y, stat)
+            y -= 15
+
+        # Daily coverage summary table
+        y -= 15
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(self.margin, y, "Daily Coverage Summary")
+        y -= 15
+
+        # Table header
+        c.setFont("Helvetica-Bold", 9)
+        cols = [self.margin + 20, self.margin + 120, self.margin + 180,
+                self.margin + 240, self.margin + 300]
+        c.drawString(cols[0], y, "Date")
+        c.drawString(cols[1], y, "Day")
+        c.drawString(cols[2], y, "Min")
+        c.drawString(cols[3], y, "Max")
+        c.drawString(cols[4], y, "Avg")
+        y -= 3
+        c.line(self.margin + 20, y, self.margin + 360, y)
+        y -= 12
+
+        c.setFont("Helvetica", 9)
+        coverage_by_day = summary.get('coverage_by_day', {})
+        for d in sorted(schedule.day_schedules.keys()):
+            coverage = coverage_by_day.get(d, {"min": 0, "max": 0, "avg": 0})
+            day_name = d.strftime("%A")[:3]
+            c.drawString(cols[0], y, d.strftime("%m/%d"))
+            c.drawString(cols[1], y, day_name)
+            c.drawString(cols[2], y, str(coverage['min']))
+            c.drawString(cols[3], y, str(coverage['max']))
+            c.drawString(cols[4], y, f"{coverage['avg']:.1f}")
+            y -= 12
+
+        # Fairness metrics
+        if schedule.fairness_metrics:
+            y -= 20
+            c.setFont("Helvetica-Bold", 12)
+            c.drawString(self.margin, y, "Fairness Metrics")
+            y -= 20
+
+            metrics = schedule.fairness_metrics
+            c.setFont("Helvetica", 10)
+            fairness_stats = [
+                f"Average Hours per Associate: {metrics.avg_hours:.1f}",
+                f"Hours Standard Deviation: {metrics.hours_std_dev:.1f}",
+                f"Hours Range: {metrics.min_hours:.1f} - {metrics.max_hours:.1f}",
+                f"Fairness Score: {metrics.fairness_score:.1f}/100",
+            ]
+
+            for stat in fairness_stats:
+                c.drawString(self.margin + 20, y, stat)
+                y -= 15
+
+            # Hours distribution visualization
+            if metrics.hours_per_associate:
+                y -= 15
+                c.setFont("Helvetica-Bold", 10)
+                c.drawString(self.margin, y, "Hours Distribution by Associate")
+                y -= 10
+
+                self._draw_hours_distribution_chart(
+                    c, metrics.hours_per_associate, associates_map,
+                    self.margin, y - 120, 500, 110
+                )
+
+        # Legend
+        self._draw_legend(c, self.margin, self.margin + 10)
+
+        c.showPage()
+
+    def _draw_hours_distribution_chart(
+        self,
+        c,
+        hours_per_associate: dict[str, float],
+        associates_map: dict[str, Associate],
+        x: float,
+        y: float,
+        width: float,
+        height: float,
+    ) -> None:
+        """Draw a horizontal bar chart showing hours per associate."""
+        if not hours_per_associate:
+            return
+
+        # Sort by hours descending
+        sorted_items = sorted(
+            hours_per_associate.items(),
+            key=lambda item: item[1],
+            reverse=True
+        )
+
+        # Limit to top 15 associates if there are many
+        display_items = sorted_items[:15]
+        max_hours = max(h for _, h in display_items) if display_items else 1
+        if max_hours == 0:
+            max_hours = 1  # Prevent division by zero
+
+        bar_height = min(12, height / len(display_items) - 2)
+        chart_width = width - 80  # Leave room for names
+
+        c.setFont("Helvetica", 7)
+
+        for i, (assoc_id, hours) in enumerate(display_items):
+            bar_y = y + height - (i + 1) * (bar_height + 2)
+            bar_width = (hours / max_hours) * chart_width
+
+            # Draw name
+            associate = associates_map.get(assoc_id)
+            name = associate.name if associate else assoc_id
+            c.drawString(x, bar_y + 2, name[:10])
+
+            # Draw bar
+            c.setFillColorRGB(0.4, 0.6, 0.8)
+            c.rect(x + 70, bar_y, bar_width, bar_height, fill=1, stroke=0)
+
+            # Draw hours label
+            c.setFillColorRGB(0, 0, 0)
+            c.drawString(x + 75 + bar_width, bar_y + 2, f"{hours:.1f}h")
+
+        if len(sorted_items) > 15:
+            c.drawString(x, y + 2, f"... and {len(sorted_items) - 15} more associates")
 
     def _draw_schedule_pages(
         self,
