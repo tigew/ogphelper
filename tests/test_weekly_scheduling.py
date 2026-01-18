@@ -1,4 +1,4 @@
-"""Tests for Phase 2: Weekly Scheduling features.
+"""Tests for Weekly Scheduling features.
 
 This module contains comprehensive tests for:
 - Multi-day scheduling

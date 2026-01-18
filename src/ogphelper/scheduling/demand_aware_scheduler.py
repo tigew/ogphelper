@@ -1,9 +1,9 @@
 """Demand-aware weekly scheduler for optimized schedule generation.
 
 This module provides the DemandAwareWeeklyScheduler that combines:
-- Weekly scheduling coordination (from Phase 2)
-- Demand curve matching (Phase 3)
-- OR-Tools CP-SAT optimization (Phase 3)
+- Weekly scheduling coordination
+- Demand curve matching
+- OR-Tools CP-SAT optimization
 """
 
 from dataclasses import dataclass, field

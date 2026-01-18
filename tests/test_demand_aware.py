@@ -1,4 +1,4 @@
-"""Tests for Phase 3: Demand-Aware Optimization.
+"""Tests for Demand-Aware Optimization.
 
 This module tests:
 - Demand models (DemandCurve, DemandProfile, WeeklyDemand)
