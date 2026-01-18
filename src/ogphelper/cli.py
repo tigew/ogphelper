@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import random
 import sys
 from datetime import date, time, timedelta
 from pathlib import Path
@@ -20,6 +21,8 @@ from ogphelper.domain.models import (
     JobRole,
     Preference,
     ScheduleRequest,
+    ShiftBlockConfig,
+    ShiftBlockType,
     WeeklyScheduleRequest,
 )
 from ogphelper.output.pdf_generator import PDFGenerator
@@ -37,20 +40,22 @@ from ogphelper.validation.validator import ScheduleValidator
 def create_sample_associates(
     count: int = 10,
     schedule_dates: Optional[list[date]] = None,
+    seed: Optional[int] = None,
+    variety_level: str = "high",
 ) -> list[Associate]:
-    """Create sample associates for testing.
+    """Create sample associates with diverse availability patterns for testing.
 
     Args:
         count: Number of associates to create.
         schedule_dates: List of dates for availability. If None, uses today only.
+        seed: Random seed for reproducibility. If None, uses current time.
+        variety_level: Level of variety - "low", "medium", or "high".
     """
+    rng = random.Random(seed if seed is not None else 42)
     associates = []
 
     if schedule_dates is None:
         schedule_dates = [date.today()]
-
-    # Default availability: 5 AM to 10 PM (full day)
-    full_day = Availability(start_slot=0, end_slot=68)  # 68 slots = 17 hours
 
     # Sample names
     names = [
@@ -61,62 +66,166 @@ def create_sample_associates(
         "Gina", "Hugo", "Iris", "Jake", "Kim", "Luke", "Maya", "Nate",
     ]
 
+    # Define diverse shift patterns (start_slot, end_slot, name)
+    # Slots: 0=5AM, 4=6AM, 12=8AM, 20=10AM, 28=12PM, 36=2PM, 44=4PM, 52=6PM, 60=8PM, 68=10PM
+    shift_patterns = [
+        (0, 32, "early_short"),      # 5 AM - 1 PM (8 hrs)
+        (0, 40, "early_long"),       # 5 AM - 3 PM (10 hrs)
+        (4, 36, "morning"),          # 6 AM - 2 PM (8 hrs)
+        (8, 40, "morning_flex"),     # 7 AM - 3 PM (8 hrs)
+        (12, 44, "day_early"),       # 8 AM - 4 PM (8 hrs)
+        (16, 48, "day_mid"),         # 9 AM - 5 PM (8 hrs)
+        (20, 52, "day_late"),        # 10 AM - 6 PM (8 hrs)
+        (24, 56, "swing_early"),     # 11 AM - 7 PM (8 hrs)
+        (28, 60, "swing_mid"),       # 12 PM - 8 PM (8 hrs)
+        (32, 64, "swing_late"),      # 1 PM - 9 PM (8 hrs)
+        (36, 68, "closing_early"),   # 2 PM - 10 PM (8 hrs)
+        (40, 68, "closing_mid"),     # 3 PM - 10 PM (7 hrs)
+        (44, 68, "closing_late"),    # 4 PM - 10 PM (6 hrs)
+        (0, 68, "full_day"),         # 5 AM - 10 PM (full availability)
+        (12, 52, "school_hours"),    # 8 AM - 6 PM (school schedule)
+        (0, 24, "early_only"),       # 5 AM - 11 AM (opener)
+        (48, 68, "evening_only"),    # 5 PM - 10 PM (closer)
+    ]
+
+    # Days off patterns: (preferred_days_off, pattern_name)
+    # Days: 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun
+    days_off_patterns = [
+        ([5, 6], "weekend_off"),          # Sat-Sun off
+        ([0, 1], "early_week_off"),        # Mon-Tue off
+        ([1, 2], "tue_wed_off"),           # Tue-Wed off
+        ([2, 3], "wed_thu_off"),           # Wed-Thu off
+        ([3, 4], "thu_fri_off"),           # Thu-Fri off
+        ([4, 5], "fri_sat_off"),           # Fri-Sat off
+        ([6, 0], "sun_mon_off"),           # Sun-Mon off
+        ([0, 3], "split_mon_thu"),         # Mon, Thu off
+        ([2, 5], "split_wed_sat"),         # Wed, Sat off
+        ([1, 4], "split_tue_fri"),         # Tue, Fri off
+        ([0, 4], "bookend_mon_fri"),       # Mon, Fri off
+        ([2, 6], "mid_late_week"),         # Wed, Sun off
+        ([5,], "sat_only"),                # Sat off (works 6 days)
+        ([6,], "sun_only"),                # Sun off (works 6 days)
+        ([4,], "fri_only"),                # Fri off (works 6 days)
+        ([], "no_fixed_off"),              # No fixed pattern (full availability)
+    ]
+
+    # Weekly hour targets: (max_daily, max_weekly, type_name)
+    hour_targets = [
+        (480, 2400, "full_time"),      # 8 hrs/day, 40 hrs/week
+        (480, 2000, "full_time_cap"),  # 8 hrs/day, 33 hrs/week
+        (360, 1800, "three_quarter"),  # 6 hrs/day, 30 hrs/week
+        (480, 1600, "part_time_a"),    # 8 hrs/day, 26 hrs/week
+        (360, 1200, "part_time_b"),    # 6 hrs/day, 20 hrs/week
+        (480, 2400, "flex_full"),      # Standard full time
+        (420, 2100, "moderate"),       # 7 hrs/day, 35 hrs/week
+    ]
+
+    # Role restrictions combinations
+    role_restrictions = [
+        (set(), "no_restrictions"),                           # Can do all
+        ({JobRole.BACKROOM}, "no_backroom"),                  # No backroom
+        ({JobRole.GMD_SM}, "no_gmd"),                         # No GMD
+        ({JobRole.EXCEPTION_SM}, "no_exception"),             # No exception
+        ({JobRole.STAGING}, "no_staging"),                    # No staging
+        ({JobRole.BACKROOM, JobRole.GMD_SM}, "no_back_gmd"), # No backroom or GMD
+        ({JobRole.STAGING, JobRole.BACKROOM}, "no_stg_back"),# No staging or backroom
+        ({JobRole.GMD_SM, JobRole.EXCEPTION_SM}, "no_sm"),   # No supervisor roles
+    ]
+
+    # Role preference combinations
+    preference_combos = [
+        ({}, "neutral"),                                      # No preferences
+        ({JobRole.PICKING: Preference.PREFER}, "prefer_picking"),
+        ({JobRole.BACKROOM: Preference.PREFER}, "prefer_backroom"),
+        ({JobRole.STAGING: Preference.PREFER}, "prefer_staging"),
+        ({JobRole.BACKROOM: Preference.AVOID}, "avoid_backroom"),
+        ({JobRole.STAGING: Preference.AVOID}, "avoid_staging"),
+        ({JobRole.PICKING: Preference.AVOID}, "avoid_picking"),
+        ({JobRole.GMD_SM: Preference.PREFER}, "prefer_gmd"),
+        ({JobRole.EXCEPTION_SM: Preference.PREFER}, "prefer_exception"),
+        ({JobRole.PICKING: Preference.PREFER, JobRole.BACKROOM: Preference.AVOID}, "pick_not_back"),
+        ({JobRole.STAGING: Preference.PREFER, JobRole.PICKING: Preference.AVOID}, "stg_not_pick"),
+        ({JobRole.GMD_SM: Preference.AVOID, JobRole.EXCEPTION_SM: Preference.AVOID}, "avoid_sm"),
+        ({JobRole.BACKROOM: Preference.PREFER, JobRole.STAGING: Preference.PREFER}, "prefer_back_stg"),
+    ]
+
     for i in range(count):
         name = names[i % len(names)]
         if i >= len(names):
             name = f"{name}{i // len(names) + 1}"
 
+        # Select patterns with variety based on level
+        if variety_level == "high":
+            shift_pattern = rng.choice(shift_patterns)
+            days_off_pattern = rng.choice(days_off_patterns)
+            hour_target = rng.choice(hour_targets)
+            role_restriction = rng.choice(role_restrictions)
+            preference_combo = rng.choice(preference_combos)
+        elif variety_level == "medium":
+            # Less variety - use first half of options
+            shift_pattern = rng.choice(shift_patterns[:10])
+            days_off_pattern = rng.choice(days_off_patterns[:8])
+            hour_target = rng.choice(hour_targets[:4])
+            role_restriction = rng.choice(role_restrictions[:4])
+            preference_combo = rng.choice(preference_combos[:6])
+        else:  # low
+            shift_pattern = shift_patterns[i % 5]
+            days_off_pattern = days_off_patterns[i % 4]
+            hour_target = hour_targets[i % 3]
+            role_restriction = role_restrictions[i % 2]
+            preference_combo = preference_combos[i % 3]
+
+        start_slot, end_slot, _ = shift_pattern
+        preferred_days_off, _ = days_off_pattern
+        max_daily, max_weekly, _ = hour_target
+        cannot_do, _ = role_restriction
+        preferences, _ = preference_combo
+
+        # Add some per-associate variation to shift times
+        if variety_level in ("high", "medium"):
+            start_jitter = rng.randint(-2, 2) * 2  # -4 to +4 slots (1 hour)
+            end_jitter = rng.randint(-2, 2) * 2
+            start_slot = max(0, min(60, start_slot + start_jitter))
+            end_slot = max(start_slot + 16, min(68, end_slot + end_jitter))
+
         # Build availability for each date
         availability = {}
         for d in schedule_dates:
-            # Vary availability slightly
-            if i % 5 == 0:
-                # Early shift: 5 AM - 3 PM
-                avail = Availability(start_slot=0, end_slot=40)
-            elif i % 5 == 1:
-                # Mid shift: 8 AM - 6 PM
-                avail = Availability(start_slot=12, end_slot=52)
-            elif i % 5 == 2:
-                # Late shift: 12 PM - 10 PM
-                avail = Availability(start_slot=28, end_slot=68)
+            weekday = d.weekday()
+
+            # Check if this day should be off based on pattern
+            is_day_off = weekday in preferred_days_off
+
+            # Add some randomization to days off for high variety
+            if variety_level == "high" and not is_day_off:
+                # 15% chance of a random day off
+                if rng.random() < 0.15:
+                    is_day_off = True
+
+            if is_day_off:
+                availability[d] = Availability.off_day()
             else:
-                # Full day
-                avail = full_day
+                # Add some daily variation for high variety
+                if variety_level == "high" and rng.random() < 0.2:
+                    # Vary the shift slightly for this day
+                    day_start = max(0, start_slot + rng.randint(-4, 4))
+                    day_end = max(day_start + 16, min(68, end_slot + rng.randint(-4, 4)))
+                    availability[d] = Availability(start_slot=day_start, end_slot=day_end)
+                else:
+                    availability[d] = Availability(start_slot=start_slot, end_slot=end_slot)
 
-            # Some associates have specific days off
-            if i % 6 == 0 and d.weekday() == 0:  # Mondays off for some
-                avail = Availability.off_day()
-            if i % 8 == 0 and d.weekday() == 4:  # Fridays off for some
-                avail = Availability.off_day()
-
-            availability[d] = avail
-
-        # All roles allowed by default
+        # All roles allowed by default, then apply restrictions
         allowed_roles = set(JobRole)
-
-        # Some associates have restrictions
-        cannot_do = set()
-        if i % 7 == 0:
-            cannot_do.add(JobRole.BACKROOM)
-        if i % 11 == 0:
-            cannot_do.add(JobRole.GMD_SM)
-
-        # Set preferences
-        preferences = {}
-        if i % 3 == 0:
-            preferences[JobRole.PICKING] = Preference.PREFER
-        if i % 4 == 0:
-            preferences[JobRole.BACKROOM] = Preference.AVOID
 
         associate = Associate(
             id=f"A{i + 1:03d}",
             name=name,
             availability=availability,
-            max_minutes_per_day=480,  # 8 hours
-            max_minutes_per_week=2400,  # 40 hours
+            max_minutes_per_day=max_daily,
+            max_minutes_per_week=max_weekly,
             supervisor_allowed_roles=allowed_roles,
-            cannot_do_roles=cannot_do,
-            role_preferences=preferences,
+            cannot_do_roles=set(cannot_do),
+            role_preferences=dict(preferences),
         )
         associates.append(associate)
 
@@ -175,6 +284,11 @@ def run_weekly_demo(
     days: int = 7,
     days_off_pattern: str = "two_consecutive",
     output_path: Optional[str] = None,
+    variety_level: str = "high",
+    seed: Optional[int] = None,
+    morning_limit: Optional[int] = None,
+    day_limit: Optional[int] = None,
+    closing_limit: Optional[int] = None,
 ) -> None:
     """Run a weekly schedule generation demo.
 
@@ -183,8 +297,14 @@ def run_weekly_demo(
         days: Number of days to schedule (default 7 for a week).
         days_off_pattern: Pattern for days off (none, two_consecutive, one_weekend_day).
         output_path: Optional PDF file path for output.
+        variety_level: Level of variety in schedules (low, medium, high).
+        seed: Random seed for reproducibility.
+        morning_limit: Max associates starting in morning block (5 AM - 11 AM).
+        day_limit: Max associates starting in day block (10 AM - 4 PM).
+        closing_limit: Max associates starting in closing block (3 PM - 10 PM).
     """
     print(f"Generating weekly schedule for {associate_count} associates over {days} days...")
+    print(f"  Variety level: {variety_level}, Seed: {seed if seed else 'random'}")
 
     # Generate date range
     start_date = date.today()
@@ -198,7 +318,9 @@ def run_weekly_demo(
     schedule_dates = [start_date + timedelta(days=i) for i in range(days)]
 
     # Create sample associates with weekly availability
-    associates = create_sample_associates(associate_count, schedule_dates)
+    associates = create_sample_associates(
+        associate_count, schedule_dates, seed=seed, variety_level=variety_level
+    )
 
     # Parse days-off pattern
     pattern_map = {
@@ -208,6 +330,41 @@ def run_weekly_demo(
         "every_other_day": DaysOffPattern.EVERY_OTHER_DAY,
     }
     pattern = pattern_map.get(days_off_pattern, DaysOffPattern.TWO_CONSECUTIVE)
+
+    # Create shift block configurations if limits specified
+    shift_block_configs = None
+    if any(x is not None for x in [morning_limit, day_limit, closing_limit]):
+        blocks = ShiftBlockConfig.create_default_blocks()
+        shift_block_configs = []
+        for block in blocks:
+            if block.block_type == ShiftBlockType.MORNING and morning_limit is not None:
+                block = ShiftBlockConfig(
+                    block_type=block.block_type,
+                    start_slot=block.start_slot,
+                    end_slot=block.end_slot,
+                    max_associates=morning_limit,
+                    target_associates=morning_limit,
+                )
+            elif block.block_type == ShiftBlockType.DAY and day_limit is not None:
+                block = ShiftBlockConfig(
+                    block_type=block.block_type,
+                    start_slot=block.start_slot,
+                    end_slot=block.end_slot,
+                    max_associates=day_limit,
+                    target_associates=day_limit,
+                )
+            elif block.block_type == ShiftBlockType.CLOSING and closing_limit is not None:
+                block = ShiftBlockConfig(
+                    block_type=block.block_type,
+                    start_slot=block.start_slot,
+                    end_slot=block.end_slot,
+                    max_associates=closing_limit,
+                    target_associates=closing_limit,
+                )
+            shift_block_configs.append(block)
+
+        print(f"  Shift block limits: morning={morning_limit or 'unlimited'}, "
+              f"day={day_limit or 'unlimited'}, closing={closing_limit or 'unlimited'}")
 
     # Create weekly schedule request
     request = WeeklyScheduleRequest(
@@ -221,6 +378,7 @@ def run_weekly_demo(
             weight_days_balance=0.3,
             max_hours_variance=120.0,  # 2 hours variance allowed
         ),
+        shift_block_configs=shift_block_configs,
     )
 
     # Generate schedule
@@ -485,8 +643,9 @@ Examples:
   %(prog)s demo --output sched.pdf    Generate PDF output
 
   %(prog)s weekly-demo                Run weekly demo with 10 associates
-  %(prog)s weekly-demo --count 20     Run weekly demo with 20 associates
-  %(prog)s weekly-demo --days 5       Generate 5-day schedule
+  %(prog)s weekly-demo --count 80 --variety high  Diverse schedules
+  %(prog)s weekly-demo --seed 123     Reproducible random schedules
+  %(prog)s weekly-demo --morning-limit 30 --closing-limit 20  Limit shifts per block
   %(prog)s weekly-demo --pattern none Disable days-off pattern
 
   %(prog)s demand-demo                Run demand-aware demo
@@ -539,6 +698,33 @@ Examples:
         "--output", "-o",
         type=str,
         help="Output PDF file path",
+    )
+    weekly_parser.add_argument(
+        "--variety", "-v",
+        type=str,
+        default="high",
+        choices=["low", "medium", "high"],
+        help="Variety level for associates (default: high)",
+    )
+    weekly_parser.add_argument(
+        "--seed", "-S",
+        type=int,
+        help="Random seed for reproducibility",
+    )
+    weekly_parser.add_argument(
+        "--morning-limit",
+        type=int,
+        help="Max associates starting in morning block (5 AM - 11 AM)",
+    )
+    weekly_parser.add_argument(
+        "--day-limit",
+        type=int,
+        help="Max associates starting in day block (10 AM - 4 PM)",
+    )
+    weekly_parser.add_argument(
+        "--closing-limit",
+        type=int,
+        help="Max associates starting in closing block (3 PM - 10 PM)",
     )
 
     # Demand-aware demo command
@@ -597,7 +783,17 @@ Examples:
         run_demo(args.count, args.output)
         return 0
     elif args.command == "weekly-demo":
-        run_weekly_demo(args.count, args.days, args.pattern, args.output)
+        run_weekly_demo(
+            args.count,
+            args.days,
+            args.pattern,
+            args.output,
+            args.variety,
+            args.seed,
+            args.morning_limit,
+            args.day_limit,
+            args.closing_limit,
+        )
         return 0
     elif args.command == "demand-demo":
         run_demand_demo(

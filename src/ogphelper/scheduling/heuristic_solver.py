@@ -19,6 +19,8 @@ from ogphelper.domain.models import (
     ScheduleBlock,
     ScheduleRequest,
     ShiftAssignment,
+    ShiftBlockConfig,
+    ShiftBlockType,
 )
 from ogphelper.domain.policies import (
     BreakPolicy,
@@ -44,6 +46,23 @@ class SlotState:
     def total_scheduled(self) -> int:
         """Total associates scheduled for this slot."""
         return self.on_floor_count + self.on_lunch_count + self.on_break_count
+
+
+@dataclass
+class ShiftBlockState:
+    """Tracks how many associates have been assigned to start in each shift block."""
+
+    counts: dict[ShiftBlockType, int] = field(
+        default_factory=lambda: {block_type: 0 for block_type in ShiftBlockType}
+    )
+
+    def get_count(self, block_type: ShiftBlockType) -> int:
+        """Get current count for a block type."""
+        return self.counts.get(block_type, 0)
+
+    def increment(self, block_type: ShiftBlockType) -> None:
+        """Increment count for a block type."""
+        self.counts[block_type] = self.counts.get(block_type, 0) + 1
 
 
 class HeuristicSolver:
@@ -91,9 +110,16 @@ class HeuristicSolver:
         # Track slot states for optimization
         slot_states = [SlotState() for _ in range(request.total_slots)]
 
-        # Step 1: Select shifts
+        # Track shift block assignments for capacity limits
+        block_state = ShiftBlockState()
+
+        # Step 1: Select shifts (with shift block capacity enforcement)
         selected_shifts = self._select_shifts(
-            candidates, slot_states, request.total_slots
+            candidates,
+            slot_states,
+            request.total_slots,
+            request.shift_block_configs,
+            block_state,
         )
 
         # Step 2-4: For each selected shift, place lunch, breaks, and assign roles
@@ -147,13 +173,23 @@ class HeuristicSolver:
         candidates: dict[str, list[ShiftCandidate]],
         slot_states: list[SlotState],
         total_slots: int,
+        shift_block_configs: Optional[list[ShiftBlockConfig]] = None,
+        block_state: Optional[ShiftBlockState] = None,
     ) -> list[ShiftCandidate]:
         """Select one shift per associate to maximize coverage.
 
         Uses a greedy approach: for each associate, pick the shift that
         contributes most to overall coverage (especially in low-coverage slots).
+        Enforces shift block capacity limits if configured.
         """
         selected = []
+
+        # Build a quick lookup for shift blocks by slot
+        block_by_slot: dict[int, ShiftBlockConfig] = {}
+        if shift_block_configs:
+            for block in shift_block_configs:
+                for slot in range(block.start_slot, block.end_slot):
+                    block_by_slot[slot] = block
 
         # Sort associates by number of candidates (fewer first - more constrained)
         sorted_associates = sorted(candidates.keys(), key=lambda a: len(candidates[a]))
@@ -168,7 +204,26 @@ class HeuristicSolver:
             best_score = float("-inf")
 
             for candidate in assoc_candidates:
+                # Check shift block capacity limit
+                if shift_block_configs and block_state:
+                    block = block_by_slot.get(candidate.start_slot)
+                    if block:
+                        current_count = block_state.get_count(block.block_type)
+                        if current_count >= block.max_associates:
+                            # This block is at capacity, skip this candidate
+                            continue
+
                 score = self._score_shift(candidate, slot_states)
+
+                # Add bonus/penalty based on shift block targets
+                if shift_block_configs and block_state:
+                    block = block_by_slot.get(candidate.start_slot)
+                    if block and block.target_associates is not None:
+                        current_count = block_state.get_count(block.block_type)
+                        if current_count < block.target_associates:
+                            # Bonus for filling under-target blocks
+                            score += 5.0 * (block.target_associates - current_count)
+
                 if score > best_score:
                     best_score = score
                     best_candidate = candidate
@@ -178,6 +233,12 @@ class HeuristicSolver:
                 # Update slot states (initially all on floor)
                 for slot in range(best_candidate.start_slot, best_candidate.end_slot):
                     slot_states[slot].on_floor_count += 1
+
+                # Update shift block state
+                if shift_block_configs and block_state:
+                    block = block_by_slot.get(best_candidate.start_slot)
+                    if block:
+                        block_state.increment(block.block_type)
 
         return selected
 

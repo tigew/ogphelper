@@ -24,6 +24,82 @@ class DaysOffPattern(Enum):
     CUSTOM = "custom"  # Custom pattern defined elsewhere
 
 
+class ShiftBlockType(Enum):
+    """Types of shift blocks for capacity planning.
+
+    These represent different time periods of the day with
+    potentially different staffing requirements.
+    """
+
+    MORNING = "morning"  # Early shifts (e.g., 5 AM - 11 AM)
+    DAY = "day"  # Mid-day shifts (e.g., 10 AM - 4 PM)
+    CLOSING = "closing"  # Late shifts (e.g., 3 PM - 10 PM)
+
+
+@dataclass
+class ShiftBlockConfig:
+    """Configuration for a shift block with capacity limits.
+
+    Attributes:
+        block_type: The type of shift block.
+        start_slot: First slot of this block (inclusive).
+        end_slot: Last slot of this block (exclusive).
+        min_associates: Minimum associates who should start in this block.
+        max_associates: Maximum associates who can start in this block.
+        target_associates: Target number of associates for this block.
+    """
+
+    block_type: ShiftBlockType
+    start_slot: int
+    end_slot: int
+    min_associates: int = 0
+    max_associates: int = 999
+    target_associates: Optional[int] = None
+
+    @classmethod
+    def create_default_blocks(
+        cls,
+        slot_minutes: int = 15,
+        day_start_minutes: int = 300,  # 5 AM
+    ) -> list["ShiftBlockConfig"]:
+        """Create default shift block configurations.
+
+        Default blocks:
+        - Morning: 5 AM - 11 AM (associates starting in this window)
+        - Day: 10 AM - 4 PM (associates starting in this window)
+        - Closing: 3 PM - 10 PM (associates starting in this window)
+        """
+        # Calculate slot indices
+        morning_start = 0  # 5 AM
+        morning_end = (11 * 60 - day_start_minutes) // slot_minutes  # 11 AM
+        day_start = (10 * 60 - day_start_minutes) // slot_minutes  # 10 AM
+        day_end = (16 * 60 - day_start_minutes) // slot_minutes  # 4 PM
+        closing_start = (15 * 60 - day_start_minutes) // slot_minutes  # 3 PM
+        closing_end = (22 * 60 - day_start_minutes) // slot_minutes  # 10 PM
+
+        return [
+            cls(
+                block_type=ShiftBlockType.MORNING,
+                start_slot=morning_start,
+                end_slot=morning_end,
+            ),
+            cls(
+                block_type=ShiftBlockType.DAY,
+                start_slot=day_start,
+                end_slot=day_end,
+            ),
+            cls(
+                block_type=ShiftBlockType.CLOSING,
+                start_slot=closing_start,
+                end_slot=closing_end,
+            ),
+        ]
+
+    def contains_slot(self, slot: int) -> bool:
+        """Check if a slot falls within this block."""
+        return self.start_slot <= slot < self.end_slot
+
+
 class JobRole(Enum):
     """Available job roles for associates."""
 
@@ -320,6 +396,7 @@ class ScheduleRequest:
         slot_minutes: Duration of each time slot in minutes.
         job_caps: Maximum associates per role per slot.
         is_busy_day: If True, allow more aggressive lunch shifting.
+        shift_block_configs: Optional shift block configurations with capacity limits.
     """
 
     schedule_date: date
@@ -337,6 +414,16 @@ class ScheduleRequest:
         }
     )
     is_busy_day: bool = False
+    shift_block_configs: Optional[list[ShiftBlockConfig]] = None
+
+    def get_shift_block_for_slot(self, slot: int) -> Optional[ShiftBlockConfig]:
+        """Get the shift block configuration for a given start slot."""
+        if not self.shift_block_configs:
+            return None
+        for block in self.shift_block_configs:
+            if block.contains_slot(slot):
+                return block
+        return None
 
     @property
     def total_slots(self) -> int:
@@ -458,6 +545,7 @@ class WeeklyScheduleRequest:
         days_off_pattern: Pattern for distributing days off.
         required_days_off: Minimum number of days off per associate per week.
         fairness_config: Configuration for fairness balancing.
+        shift_block_configs: Optional shift block configurations with capacity limits.
     """
 
     start_date: date
@@ -479,6 +567,7 @@ class WeeklyScheduleRequest:
     days_off_pattern: DaysOffPattern = DaysOffPattern.TWO_CONSECUTIVE
     required_days_off: int = 2
     fairness_config: FairnessConfig = field(default_factory=FairnessConfig)
+    shift_block_configs: Optional[list[ShiftBlockConfig]] = None
 
     @property
     def total_slots_per_day(self) -> int:
@@ -514,6 +603,7 @@ class WeeklyScheduleRequest:
             slot_minutes=self.slot_minutes,
             job_caps=self.job_caps,
             is_busy_day=self.is_busy_day(schedule_date),
+            shift_block_configs=self.shift_block_configs,
         )
 
 
