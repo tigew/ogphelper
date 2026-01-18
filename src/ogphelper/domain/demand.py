@@ -323,9 +323,10 @@ class DemandProfile:
                         )
 
         # Add priority windows
-        for start_hour, end_hour, priority in self.priority_windows:
-            start_slot = (start_hour - start_hour) * slots_per_hour
-            end_slot = (end_hour - start_hour) * slots_per_hour
+        day_start_hour = day_start_minutes // 60
+        for window_start_hour, window_end_hour, priority in self.priority_windows:
+            start_slot = (window_start_hour - day_start_hour) * slots_per_hour
+            end_slot = (window_end_hour - day_start_hour) * slots_per_hour
             curve.add_priority_period(start_slot, end_slot, priority)
 
         return curve

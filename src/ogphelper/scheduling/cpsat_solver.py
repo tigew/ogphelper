@@ -210,9 +210,12 @@ class CPSATSolver:
 
                             if lunch_at_slot:
                                 # on_floor = x[assoc_id][c_idx] AND NOT any(lunch_at_slot)
+                                # not_on_lunch is true iff NONE of the lunch_at_slot vars are true
                                 not_on_lunch = model.NewBoolVar(f"not_lunch_{assoc_id}_{c_idx}_{slot}")
-                                model.AddBoolOr([v.Not() for v in lunch_at_slot]).OnlyEnforceIf(not_on_lunch)
-                                model.AddBoolAnd(lunch_at_slot).OnlyEnforceIf(not_on_lunch.Not())
+                                # If not_on_lunch, all lunch vars for this slot must be false
+                                model.AddBoolAnd([v.Not() for v in lunch_at_slot]).OnlyEnforceIf(not_on_lunch)
+                                # If NOT not_on_lunch (i.e., on lunch), at least one must be true
+                                model.AddBoolOr(lunch_at_slot).OnlyEnforceIf(not_on_lunch.Not())
 
                                 model.AddBoolAnd([x[assoc_id][c_idx], not_on_lunch]).OnlyEnforceIf(on_floor)
                                 model.AddBoolOr([x[assoc_id][c_idx].Not(), not_on_lunch.Not()]).OnlyEnforceIf(on_floor.Not())

@@ -237,6 +237,55 @@ class TestDemandProfile:
         assert curve.total_slots == 68
 
 
+class TestDemandProfilePriorityWindows:
+    """Tests for priority window slot offset calculation."""
+
+    def test_priority_window_correct_offset(self, sample_date: date) -> None:
+        """Test that priority windows are placed at correct slot offsets."""
+        profile = DemandProfile(
+            name="test",
+            hourly_pattern={h: 5 for h in range(5, 22)},
+            priority_windows=[
+                (10, 12, DemandPriority.HIGH),  # 10 AM - 12 PM
+                (14, 16, DemandPriority.CRITICAL),  # 2 PM - 4 PM
+            ],
+        )
+
+        curve = profile.to_demand_curve(sample_date)
+
+        # Slot 0 = 5:00 AM, so 10 AM = slot 20 (5 hours * 4 slots/hour)
+        # 12 PM = slot 28, 2 PM = slot 36, 4 PM = slot 44
+
+        # Before peak (9 AM = slot 16) should be NORMAL
+        assert curve.get_priority_at_slot(16) == DemandPriority.NORMAL
+
+        # During first peak (10:30 AM = slot 22) should be HIGH
+        assert curve.get_priority_at_slot(22) == DemandPriority.HIGH
+
+        # Between peaks (1 PM = slot 32) should be NORMAL
+        assert curve.get_priority_at_slot(32) == DemandPriority.NORMAL
+
+        # During second peak (3 PM = slot 40) should be CRITICAL
+        assert curve.get_priority_at_slot(40) == DemandPriority.CRITICAL
+
+        # After peaks (5 PM = slot 48) should be NORMAL
+        assert curve.get_priority_at_slot(48) == DemandPriority.NORMAL
+
+    def test_weekday_profile_priority_windows(self, sample_date: date) -> None:
+        """Test that weekday profile has correctly placed priority windows."""
+        profile = DemandProfile.create_weekday_profile()
+        curve = profile.to_demand_curve(sample_date)
+
+        # Weekday profile has priority windows at (10, 12) and (14, 16)
+        # 10 AM = slot 20, 12 PM = slot 28, 2 PM = slot 36, 4 PM = slot 44
+
+        # Slot 20 (10 AM) should be HIGH
+        assert curve.get_priority_at_slot(20) == DemandPriority.HIGH
+
+        # Slot 36 (2 PM) should be HIGH
+        assert curve.get_priority_at_slot(36) == DemandPriority.HIGH
+
+
 class TestWeeklyDemand:
     """Tests for WeeklyDemand."""
 
