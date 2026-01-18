@@ -84,6 +84,10 @@ if result.is_valid:
 
 ## Command Line Interface
 
+All commands support PDF output with the `--output` flag, generating professional printable schedules with timelines, coverage charts, and summary statistics.
+
+### Daily Scheduling
+
 ```bash
 # Run daily demo with 10 associates
 ogphelper demo
@@ -93,16 +97,61 @@ ogphelper demo --count 30
 
 # Generate PDF output
 ogphelper demo --count 20 --output schedule.pdf
+```
 
-# Run weekly demo
+### Weekly Scheduling
+
+```bash
+# Run weekly demo (7 days, 10 associates)
 ogphelper weekly-demo
+
+# Customize associate count, days, and days-off pattern
 ogphelper weekly-demo --count 20 --days 5 --pattern two_consecutive
 
-# Run demand-aware demo
-ogphelper demand-demo
-ogphelper demand-demo --solver cpsat --optimization match_demand
-ogphelper demand-demo --count 15 --profile high_volume --time-limit 60
+# Generate PDF with multi-day timelines and weekly summary
+ogphelper weekly-demo --count 15 --output weekly_schedule.pdf
+
+# Different days-off patterns
+ogphelper weekly-demo --pattern none              # No enforced pattern
+ogphelper weekly-demo --pattern one_weekend_day   # At least one weekend day off
+ogphelper weekly-demo --pattern every_other_day   # Work every other day max
 ```
+
+### Demand-Aware Scheduling
+
+```bash
+# Run demand-aware demo with default settings
+ogphelper demand-demo
+
+# Use CP-SAT solver for optimal solutions
+ogphelper demand-demo --solver cpsat --optimization match_demand
+
+# High-volume demand profile with PDF output
+ogphelper demand-demo --count 15 --profile high_volume --output demand_schedule.pdf
+
+# Customize solver time limit and optimization mode
+ogphelper demand-demo --solver cpsat --time-limit 60 --optimization minimize_undercoverage
+
+# All demand-demo options
+ogphelper demand-demo \
+  --count 20 \
+  --days 7 \
+  --solver hybrid \
+  --optimization balanced \
+  --profile weekday \
+  --time-limit 30 \
+  --output schedule.pdf
+```
+
+### PDF Output Features
+
+All generated PDFs include:
+- **Timeline View**: Color-coded visual representation of each associate's shift
+- **Shift Details**: Start/end times, lunch breaks (L), rest breaks (B)
+- **Role Assignments**: Color-coded by job role (Picking, GMD/SM, Exception, Staging, Backroom)
+- **Coverage Charts**: Hourly staffing levels across the day
+- **Summary Statistics**: Total hours, coverage min/max/avg, role distribution
+- **Weekly Summary** (for weekly/demand commands): Fairness metrics, hours distribution chart
 
 ## Core Concepts
 
@@ -218,42 +267,95 @@ pytest tests/test_policies.py
 
 ## Configuration
 
-### Custom Policies
+### Operating Window Configuration
+
+Configure the daily schedule boundaries:
 
 ```python
-from ogphelper.domain.policies import (
-    DefaultShiftPolicy,
-    DefaultLunchPolicy,
-    DefaultBreakPolicy,
-)
-from ogphelper.scheduling import Scheduler
+from ogphelper.domain.models import ScheduleRequest
 
-# Custom shift bounds
-shift_policy = DefaultShiftPolicy(min_work=180, max_work=540)
-
-# Custom lunch thresholds
-lunch_policy = DefaultLunchPolicy(
-    no_lunch_threshold=300,  # 5 hours
-    short_lunch_threshold=360,  # 6 hours
-    short_lunch_duration=20,
-    long_lunch_duration=45,
-)
-
-# Custom break settings
-break_policy = DefaultBreakPolicy(
-    one_break_threshold=240,  # 4 hours
-    two_break_threshold=420,  # 7 hours
-    break_duration=10,
-)
-
-scheduler = Scheduler(
-    shift_policy=shift_policy,
-    lunch_policy=lunch_policy,
-    break_policy=break_policy,
+request = ScheduleRequest(
+    schedule_date=date.today(),
+    associates=associates,
+    day_start_minutes=300,   # 5:00 AM (minutes from midnight)
+    day_end_minutes=1320,    # 10:00 PM
+    slot_minutes=15,         # 15-minute time slots
 )
 ```
 
-### Custom Role Caps
+### Shift Policy Configuration
+
+Control minimum and maximum work hours:
+
+```python
+from ogphelper.domain.policies import DefaultShiftPolicy
+from ogphelper.scheduling import Scheduler
+
+# Custom shift bounds (in minutes)
+shift_policy = DefaultShiftPolicy(
+    min_work=180,    # 3 hours minimum shift
+    max_work=540,    # 9 hours maximum shift
+)
+
+scheduler = Scheduler(shift_policy=shift_policy)
+```
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `min_work` | 240 (4h) | Minimum work minutes per shift |
+| `max_work` | 480 (8h) | Maximum work minutes per shift (excluding lunch) |
+
+### Lunch Policy Configuration
+
+Configure lunch break rules based on shift length:
+
+```python
+from ogphelper.domain.policies import DefaultLunchPolicy
+from ogphelper.scheduling import Scheduler
+
+lunch_policy = DefaultLunchPolicy(
+    no_lunch_threshold=360,      # No lunch if working < 6 hours
+    short_lunch_threshold=390,   # 30-min lunch if 6-6.5 hours
+    short_lunch_duration=30,     # Duration of short lunch
+    long_lunch_duration=60,      # Duration of long lunch (>= 6.5 hours)
+)
+
+scheduler = Scheduler(lunch_policy=lunch_policy)
+```
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `no_lunch_threshold` | 360 (6h) | No lunch required below this work time |
+| `short_lunch_threshold` | 390 (6.5h) | Short lunch for work time between thresholds |
+| `short_lunch_duration` | 30 | Minutes for short lunch break |
+| `long_lunch_duration` | 60 | Minutes for long lunch break |
+
+### Break Policy Configuration
+
+Configure rest break rules:
+
+```python
+from ogphelper.domain.policies import DefaultBreakPolicy
+from ogphelper.scheduling import Scheduler
+
+break_policy = DefaultBreakPolicy(
+    one_break_threshold=300,   # 1 break if working 5+ hours
+    two_break_threshold=480,   # 2 breaks if working 8+ hours
+    break_duration=15,         # Minutes per break
+)
+
+scheduler = Scheduler(break_policy=break_policy)
+```
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `one_break_threshold` | 300 (5h) | Work time requiring 1 break |
+| `two_break_threshold` | 480 (8h) | Work time requiring 2 breaks |
+| `break_duration` | 15 | Duration of each break in minutes |
+
+### Role Caps Configuration
+
+Limit how many associates can be assigned to each role per time slot:
 
 ```python
 from ogphelper.domain.models import JobRole, ScheduleRequest
@@ -262,14 +364,80 @@ request = ScheduleRequest(
     schedule_date=date.today(),
     associates=associates,
     job_caps={
-        JobRole.PICKING: 999,
-        JobRole.GMD_SM: 3,      # Increased
-        JobRole.EXCEPTION_SM: 3,
-        JobRole.STAGING: 4,
-        JobRole.BACKROOM: 12,   # Increased
+        JobRole.PICKING: 999,       # Unlimited (overflow role)
+        JobRole.GMD_SM: 3,          # Max 3 per slot
+        JobRole.EXCEPTION_SM: 3,    # Max 3 per slot
+        JobRole.STAGING: 4,         # Max 4 per slot
+        JobRole.BACKROOM: 12,       # Max 12 per slot
     },
 )
 ```
+
+### Associate Configuration
+
+Configure individual associate constraints:
+
+```python
+from ogphelper.domain.models import Associate, Availability, JobRole, Preference
+
+associate = Associate(
+    id="A001",
+    name="Alice",
+    availability={
+        date.today(): Availability(start_slot=0, end_slot=68),      # Full day
+        date.today() + timedelta(days=1): Availability.off_day(),   # Day off
+    },
+    max_minutes_per_day=480,           # 8 hours daily max
+    max_minutes_per_week=2400,         # 40 hours weekly max
+    supervisor_allowed_roles={JobRole.PICKING, JobRole.STAGING},  # Approved roles
+    cannot_do_roles={JobRole.BACKROOM},                           # Physical restrictions
+    role_preferences={
+        JobRole.PICKING: Preference.PREFER,    # Soft preference
+        JobRole.GMD_SM: Preference.AVOID,      # Soft avoidance
+    },
+)
+```
+
+| Constraint Type | Description |
+|-----------------|-------------|
+| `supervisor_allowed_roles` | Hard constraint - roles approved by supervisor |
+| `cannot_do_roles` | Hard constraint - roles associate physically cannot do |
+| `role_preferences` | Soft constraint - preferred/avoided roles (optimizer tries to respect) |
+
+### Weekly Schedule Configuration
+
+Configure multi-day scheduling with fairness balancing:
+
+```python
+from ogphelper.domain.models import (
+    WeeklyScheduleRequest,
+    DaysOffPattern,
+    FairnessConfig,
+)
+
+request = WeeklyScheduleRequest(
+    start_date=date.today(),
+    end_date=date.today() + timedelta(days=6),
+    associates=associates,
+    days_off_pattern=DaysOffPattern.TWO_CONSECUTIVE,
+    required_days_off=2,
+    busy_days={date.today() + timedelta(days=5)},  # Saturday is busy
+    fairness_config=FairnessConfig(
+        target_weekly_minutes=2000,    # Target 33 hours/week
+        min_weekly_minutes=1200,       # At least 20 hours/week
+        max_hours_variance=120.0,      # Allow 2 hour variance between associates
+        weight_hours_balance=0.7,      # 70% weight on hours fairness
+        weight_days_balance=0.3,       # 30% weight on days worked fairness
+    ),
+)
+```
+
+| Days Off Pattern | Description |
+|------------------|-------------|
+| `NONE` | No pattern enforced |
+| `TWO_CONSECUTIVE` | Two consecutive days off required |
+| `ONE_WEEKEND_DAY` | At least one weekend day off |
+| `EVERY_OTHER_DAY` | Cannot work more than every other day |
 
 ### Demand-Aware Scheduling
 
