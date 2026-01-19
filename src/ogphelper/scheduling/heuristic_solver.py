@@ -510,6 +510,7 @@ class HeuristicSolver:
         1. Fill constrained roles first (GMD, Exception, Staging, Backroom)
         2. Assign Picking as overflow
         3. Respect caps and eligibility
+        4. Hourly caps are based on SHIFT start time, not period start
         """
         eligible_roles = associate.eligible_roles()
         if not eligible_roles:
@@ -518,12 +519,16 @@ class HeuristicSolver:
         # Build list of work periods (excluding lunch and breaks)
         work_periods = self._get_work_periods(candidate, assignment)
 
+        # Use shift start for hourly cap calculations (not period start)
+        shift_start_slot = candidate.start_slot
+
         assignments = []
 
         for period in work_periods:
             # For simplicity, assign one role per work period
             role = self._select_role_for_period(
-                period, eligible_roles, associate, slot_states, job_caps
+                period, eligible_roles, associate, slot_states, job_caps,
+                shift_start_slot
             )
             if role:
                 assignments.append(JobAssignment(role=role, block=period))
@@ -570,6 +575,34 @@ class HeuristicSolver:
 
         return periods
 
+    def _get_hourly_cap(
+        self,
+        role: JobRole,
+        slot: int,
+        job_caps: dict[JobRole, int],
+    ) -> int:
+        """Get the effective cap for a role at a given slot.
+
+        Caps ramp up gradually by hour to spread coverage:
+        - 5AM (hour 0): Exception_SM=1, all others=0
+        - 6AM (hour 1): Exception_SM=2, others=1
+        - 7AM+ (hour 2+): All at normal job_caps
+
+        This ensures constrained roles are added 1 per hour rather than
+        all at once, providing better coverage throughout the day.
+        """
+        hours_elapsed = slot // 4  # 0 for 5AM, 1 for 6AM, 2 for 7AM, etc.
+        base_cap = job_caps.get(role, 999)
+
+        if role == JobRole.EXCEPTION_SM:
+            # Exception_SM starts at 1 from 5AM
+            effective_cap = min(hours_elapsed + 1, base_cap)
+        else:
+            # Other constrained roles start at 0, add 1 per hour
+            effective_cap = min(hours_elapsed, base_cap)
+
+        return effective_cap
+
     def _select_role_for_period(
         self,
         period: ScheduleBlock,
@@ -577,56 +610,51 @@ class HeuristicSolver:
         associate: Associate,
         slot_states: list[SlotState],
         job_caps: dict[JobRole, int],
+        shift_start_slot: int,
     ) -> Optional[JobRole]:
         """Select best role for a work period.
 
         Priority:
-        1. Constrained roles with 0 staffing (meet minimum of 1 first)
-        2. Constrained roles under cap (fill additional slots)
-        3. Picking as default
-        4. Any eligible role as last resort
+        1. Constrained roles under their hourly cap (ramps up by hour)
+        2. Picking as default
+        3. Any eligible role as last resort
+
+        Hourly caps ensure gradual ramp-up of constrained roles:
+        - 5AM: Only Exception_SM (cap=1), rest are Pickers
+        - 6AM+: Add at most 1 of each constrained role per hour
+
+        The hourly cap is based on when the SHIFT started, not when
+        this particular work period starts. This prevents early starters
+        from taking constrained roles in later periods that should be
+        reserved for people starting at those later hours.
         """
         # Priority order for constrained roles
         constrained_priority = [
+            JobRole.EXCEPTION_SM,  # First - allowed from 5AM
             JobRole.GMD_SM,
-            JobRole.EXCEPTION_SM,
             JobRole.STAGING,
             JobRole.BACKROOM,
             JobRole.SR,
         ]
 
-        # First pass: prioritize roles that have 0 staffing (need minimum of 1)
+        # Check constrained roles with hourly caps
+        # Use SHIFT start (not period start) to determine hourly cap
         for role in constrained_priority:
             if role not in eligible_roles:
                 continue
 
-            # Check if this role has 0 staffing in any slot of the period
-            needs_minimum = False
+            # Get the hourly cap based on when the SHIFT started
+            hourly_cap = self._get_hourly_cap(role, shift_start_slot, job_caps)
+
+            # Check if we can assign this role (under hourly cap at shift start,
+            # and under normal job_cap for all slots in period)
             can_assign = True
             for slot in range(period.start_slot, period.end_slot):
                 current_count = slot_states[slot].role_counts[role]
-                cap = job_caps.get(role, 999)
-                if current_count == 0:
-                    needs_minimum = True
-                if current_count >= cap:
-                    can_assign = False
-                    break
-
-            if needs_minimum and can_assign:
-                # Check preference - don't force avoid roles for constrained
-                pref = associate.get_preference(role)
-                if pref != Preference.AVOID:
-                    return role
-
-        # Second pass: fill roles that are under cap (already have minimum)
-        for role in constrained_priority:
-            if role not in eligible_roles:
-                continue
-
-            # Check if we can assign this role (under cap for all slots)
-            can_assign = True
-            for slot in range(period.start_slot, period.end_slot):
-                if slot_states[slot].role_counts[role] >= job_caps.get(role, 999):
+                # Use hourly cap (based on shift start) as the limit
+                # This is more restrictive than job_cap for early starters
+                effective_cap = min(hourly_cap, job_caps.get(role, 999))
+                if current_count >= effective_cap:
                     can_assign = False
                     break
 
@@ -636,7 +664,7 @@ class HeuristicSolver:
                 if pref != Preference.AVOID:
                     return role
 
-        # Fall back to Picking or preferred roles
+        # Fall back to Picking
         if JobRole.PICKING in eligible_roles:
             return JobRole.PICKING
 
