@@ -160,7 +160,7 @@ class HeuristicSolver:
             # Place lunch if needed
             if candidate.lunch_slots > 0:
                 lunch_block = self._place_lunch(
-                    candidate, slot_states, request.is_busy_day
+                    candidate, slot_states, request.is_busy_day, request.day_start_minutes
                 )
                 assignment.lunch_block = lunch_block
                 # Update slot states for lunch
@@ -330,6 +330,7 @@ class HeuristicSolver:
         candidate: ShiftCandidate,
         slot_states: list[SlotState],
         is_busy_day: bool,
+        day_start_minutes: int = 300,  # Default 5AM
     ) -> ScheduleBlock:
         """Place lunch to minimize coverage impact.
 
@@ -338,6 +339,10 @@ class HeuristicSolver:
         """
         lunch_slots = candidate.lunch_slots
         slot_minutes = candidate.slot_minutes
+
+        # Calculate early-starter cutoff: before 8AM (480 minutes from midnight)
+        early_cutoff_minutes = 480  # 8AM
+        early_cutoff_slot = (early_cutoff_minutes - day_start_minutes) // slot_minutes
 
         # Get allowed window from policy
         earliest, latest = self.lunch_policy.get_lunch_window(
@@ -352,12 +357,35 @@ class HeuristicSolver:
         best_start = earliest
         best_score = float("-inf")
 
-        for start in range(earliest, latest + 1):
+        # Calculate target (roughly 4 hours into shift for 8-hour shifts)
+        shift_length = candidate.end_slot - candidate.start_slot
+        mid_point = candidate.start_slot + shift_length // 2
+        target = mid_point - lunch_slots // 2
+
+        # For early starters (before 8AM), don't allow lunches before target
+        # This prevents 8AM lunches for 5AM starters - they should start at 9AM
+        if candidate.start_slot < early_cutoff_slot:
+            loop_start = target
+        else:
+            loop_start = earliest
+
+        # Use 30-min stagger pattern for all associates
+        # This creates overlapping lunch groups: 9:00, 9:30, 10:00, etc.
+        # With 50 associates, this is necessary to fit everyone without early lunches
+        stagger_slots = 2  # 30 min with 15-min slots
+        for start in range(loop_start, latest + 1, stagger_slots):
             end = start + lunch_slots
             if end > candidate.end_slot:
                 break
 
-            score = self._score_lunch_position(start, end, slot_states)
+            # Score based on how many lunches already at this exact position
+            # (allows some grouping at each 30-min slot)
+            lunches_at_position = sum(
+                slot_states[slot].on_lunch_count for slot in range(start, end)
+            ) // lunch_slots  # Average lunches per slot
+
+            score = -lunches_at_position * 5.0  # Prefer less crowded slots
+
             if score > best_score:
                 best_score = score
                 best_start = start
