@@ -23,6 +23,7 @@ from ogphelper.domain.models import (
     ScheduleRequest,
     ShiftBlockConfig,
     ShiftBlockType,
+    ShiftStartConfig,
     WeeklyScheduleRequest,
 )
 from ogphelper.output.pdf_generator import PDFGenerator
@@ -232,6 +233,127 @@ def create_sample_associates(
     return associates
 
 
+def create_realistic_associates(
+    shift_start_configs: list[ShiftStartConfig],
+    schedule_dates: list[date],
+    seed: Optional[int] = None,
+) -> list[Associate]:
+    """Create associates that match a realistic shift start distribution.
+
+    Each associate's availability is set to match one of the shift start times,
+    with appropriate end times (8-hour shifts by default).
+
+    Args:
+        shift_start_configs: List of shift start configurations with target counts.
+        schedule_dates: List of dates for availability.
+        seed: Random seed for reproducibility.
+
+    Returns:
+        List of associates configured to match the distribution.
+    """
+    rng = random.Random(seed if seed is not None else 42)
+    associates = []
+
+    # Sample names
+    names = [
+        "Alice", "Bob", "Carol", "David", "Eve", "Frank", "Grace", "Henry",
+        "Ivy", "Jack", "Kate", "Leo", "Mia", "Noah", "Olivia", "Paul",
+        "Quinn", "Rose", "Sam", "Tina", "Uma", "Victor", "Wendy", "Xavier",
+        "Yara", "Zach", "Amy", "Ben", "Chloe", "Dan", "Emma", "Finn",
+        "Gina", "Hugo", "Iris", "Jake", "Kim", "Luke", "Maya", "Nate",
+    ]
+
+    # Days off patterns for variety
+    days_off_patterns = [
+        [5, 6], [0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [6, 0],
+        [0, 3], [2, 5], [1, 4], [0, 4], [2, 6],
+    ]
+
+    # Role restrictions for variety
+    role_restrictions = [
+        set(),  # No restrictions
+        {JobRole.BACKROOM},
+        {JobRole.GMD_SM},
+        {JobRole.STAGING},
+        {JobRole.SR},
+        set(),
+        set(),
+        set(),  # Weight towards no restrictions
+    ]
+
+    # Role preferences for variety
+    preference_combos = [
+        {},
+        {JobRole.PICKING: Preference.PREFER},
+        {JobRole.BACKROOM: Preference.PREFER},
+        {JobRole.STAGING: Preference.PREFER},
+        {JobRole.BACKROOM: Preference.AVOID},
+        {JobRole.SR: Preference.PREFER},
+        {},
+        {},  # Weight towards neutral
+    ]
+
+    associate_idx = 0
+
+    # Create associates for each shift start time
+    for cfg in shift_start_configs:
+        for _ in range(cfg.target_count):
+            name = names[associate_idx % len(names)]
+            if associate_idx >= len(names):
+                name = f"{name}{associate_idx // len(names) + 1}"
+
+            # Calculate shift end (8 hours = 32 slots for 15-min slots)
+            start_slot = cfg.start_slot
+            end_slot = min(start_slot + 32, 68)  # Cap at 10 PM
+
+            # For closers, extend availability
+            if start_slot >= 36:  # 2 PM or later
+                end_slot = 68  # Available until 10 PM
+
+            # Select days off pattern
+            preferred_days_off = rng.choice(days_off_patterns)
+            cannot_do = rng.choice(role_restrictions)
+            preferences = rng.choice(preference_combos)
+
+            # Build availability for each date
+            availability = {}
+            for d in schedule_dates:
+                weekday = d.weekday()
+                is_day_off = weekday in preferred_days_off
+
+                # Add some randomization to days off
+                if not is_day_off and rng.random() < 0.1:
+                    is_day_off = True
+
+                if is_day_off:
+                    availability[d] = Availability.off_day()
+                else:
+                    # Small jitter to start time for realism
+                    jitter = rng.choice([-2, 0, 0, 0, 2])  # Weight towards no jitter
+                    actual_start = max(0, start_slot + jitter)
+                    actual_end = min(68, end_slot + jitter)
+                    availability[d] = Availability(
+                        start_slot=actual_start, end_slot=actual_end
+                    )
+
+            allowed_roles = set(JobRole)
+
+            associate = Associate(
+                id=f"A{associate_idx + 1:03d}",
+                name=name,
+                availability=availability,
+                max_minutes_per_day=480,  # 8 hours
+                max_minutes_per_week=2400,  # 40 hours
+                supervisor_allowed_roles=allowed_roles,
+                cannot_do_roles=set(cannot_do),
+                role_preferences=dict(preferences),
+            )
+            associates.append(associate)
+            associate_idx += 1
+
+    return associates
+
+
 def run_demo(associate_count: int = 10, output_path: Optional[str] = None) -> None:
     """Run a demo schedule generation."""
     print(f"Generating demo schedule for {associate_count} associates...")
@@ -289,6 +411,7 @@ def run_weekly_demo(
     morning_limit: Optional[int] = None,
     day_limit: Optional[int] = None,
     closing_limit: Optional[int] = None,
+    realistic: bool = False,
 ) -> None:
     """Run a weekly schedule generation demo.
 
@@ -302,10 +425,8 @@ def run_weekly_demo(
         morning_limit: Max associates starting in morning block (5 AM - 11 AM).
         day_limit: Max associates starting in day block (10 AM - 4 PM).
         closing_limit: Max associates starting in closing block (3 PM - 10 PM).
+        realistic: Use realistic shift distribution (47 associates standard).
     """
-    print(f"Generating weekly schedule for {associate_count} associates over {days} days...")
-    print(f"  Variety level: {variety_level}, Seed: {seed if seed else 'random'}")
-
     # Generate date range
     start_date = date.today()
     # Adjust to start on Monday if scheduling a full week
@@ -317,10 +438,37 @@ def run_weekly_demo(
 
     schedule_dates = [start_date + timedelta(days=i) for i in range(days)]
 
-    # Create sample associates with weekly availability
-    associates = create_sample_associates(
-        associate_count, schedule_dates, seed=seed, variety_level=variety_level
-    )
+    # Create shift start configs for realistic mode
+    shift_start_configs = None
+    if realistic:
+        base_distribution = ShiftStartConfig.create_standard_distribution()
+        if associate_count != 47:  # 47 is the standard total
+            shift_start_configs = ShiftStartConfig.scale_distribution(
+                base_distribution, associate_count
+            )
+        else:
+            shift_start_configs = base_distribution
+
+        # Create associates matching the distribution
+        associates = create_realistic_associates(
+            shift_start_configs, schedule_dates, seed=seed
+        )
+        associate_count = len(associates)
+
+        print(f"Generating weekly schedule for {associate_count} associates over {days} days...")
+        print(f"  Mode: REALISTIC (real shift distribution)")
+        print(f"  Shift starts: ", end="")
+        for cfg in shift_start_configs:
+            print(f"{cfg.label}:{cfg.target_count} ", end="")
+        print()
+    else:
+        print(f"Generating weekly schedule for {associate_count} associates over {days} days...")
+        print(f"  Variety level: {variety_level}, Seed: {seed if seed else 'random'}")
+
+        # Create sample associates with weekly availability
+        associates = create_sample_associates(
+            associate_count, schedule_dates, seed=seed, variety_level=variety_level
+        )
 
     # Parse days-off pattern
     pattern_map = {
@@ -331,9 +479,9 @@ def run_weekly_demo(
     }
     pattern = pattern_map.get(days_off_pattern, DaysOffPattern.TWO_CONSECUTIVE)
 
-    # Create shift block configurations if limits specified
+    # Create shift block configurations if limits specified (only for non-realistic mode)
     shift_block_configs = None
-    if any(x is not None for x in [morning_limit, day_limit, closing_limit]):
+    if not realistic and any(x is not None for x in [morning_limit, day_limit, closing_limit]):
         blocks = ShiftBlockConfig.create_default_blocks()
         shift_block_configs = []
         for block in blocks:
@@ -379,6 +527,7 @@ def run_weekly_demo(
             max_hours_variance=120.0,  # 2 hours variance allowed
         ),
         shift_block_configs=shift_block_configs,
+        shift_start_configs=shift_start_configs,
     )
 
     # Generate schedule
@@ -643,10 +792,10 @@ Examples:
   %(prog)s demo --output sched.pdf    Generate PDF output
 
   %(prog)s weekly-demo                Run weekly demo with 10 associates
-  %(prog)s weekly-demo --count 80 --variety high  Diverse schedules
-  %(prog)s weekly-demo --seed 123     Reproducible random schedules
+  %(prog)s weekly-demo --realistic    Use real shift distribution (47 associates)
+  %(prog)s weekly-demo --realistic --count 80  Scale distribution to 80 associates
+  %(prog)s weekly-demo --variety high Diverse random schedules
   %(prog)s weekly-demo --morning-limit 30 --closing-limit 20  Limit shifts per block
-  %(prog)s weekly-demo --pattern none Disable days-off pattern
 
   %(prog)s demand-demo                Run demand-aware demo
   %(prog)s demand-demo --solver cpsat Use CP-SAT solver
@@ -726,6 +875,11 @@ Examples:
         type=int,
         help="Max associates starting in closing block (3 PM - 10 PM)",
     )
+    weekly_parser.add_argument(
+        "--realistic", "-r",
+        action="store_true",
+        help="Use realistic shift distribution (9@5AM, 7@6AM, 5@7AM, 2@8AM, 1@8:30AM, 5@9AM, 1@9:30AM, 3@10AM, 6@11AM, 3@1PM, 5@2PM)",
+    )
 
     # Demand-aware demo command
     demand_parser = subparsers.add_parser(
@@ -793,6 +947,7 @@ Examples:
             args.morning_limit,
             args.day_limit,
             args.closing_limit,
+            args.realistic,
         )
         return 0
     elif args.command == "demand-demo":
