@@ -24,6 +24,7 @@ from ogphelper.domain.models import (
     ShiftBlockConfig,
     ShiftBlockType,
     ShiftStartConfig,
+    SlotRangeCaps,
     WeeklyScheduleRequest,
 )
 from ogphelper.output.pdf_generator import PDFGenerator
@@ -417,10 +418,17 @@ def run_demo(
         )
 
     # Create schedule request
+    # In realistic mode, use 5AM staffing configuration
+    slot_range_caps = None
+    if realistic:
+        slot_range_caps = [SlotRangeCaps.create_5am_staffing()]
+        print(f"  5AM staffing: 1 GMD/SR, 1 Exception, no Staging, no Backroom")
+
     request = ScheduleRequest(
         schedule_date=schedule_date,
         associates=associates,
         is_busy_day=False,
+        slot_range_caps=slot_range_caps,
     )
 
     # Generate schedule
@@ -575,6 +583,12 @@ def run_weekly_demo(
         print(f"  Shift block limits: morning={morning_limit or 'unlimited'}, "
               f"day={day_limit or 'unlimited'}, closing={closing_limit or 'unlimited'}")
 
+    # Create 5AM staffing configuration for realistic mode
+    slot_range_caps = None
+    if realistic:
+        slot_range_caps = [SlotRangeCaps.create_5am_staffing()]
+        print(f"  5AM staffing: 1 GMD/SR, 1 Exception, no Staging, no Backroom")
+
     # Create weekly schedule request
     # Note: In realistic mode, shift_start_configs are used to create associates but
     # NOT passed as constraints to the scheduler, since the targets represent total
@@ -594,6 +608,7 @@ def run_weekly_demo(
         ),
         shift_block_configs=shift_block_configs,
         shift_start_configs=None if realistic else shift_start_configs,
+        slot_range_caps=slot_range_caps,
     )
 
     # Generate schedule
