@@ -366,16 +366,55 @@ def create_realistic_associates(
     return associates
 
 
-def run_demo(associate_count: int = 10, output_path: Optional[str] = None) -> None:
-    """Run a demo schedule generation."""
-    print(f"Generating demo schedule for {associate_count} associates...")
+def run_demo(
+    associate_count: int = 10,
+    output_path: Optional[str] = None,
+    realistic: bool = False,
+    seed: Optional[int] = None,
+) -> None:
+    """Run a demo schedule generation.
 
-    # Create sample associates
-    associates = create_sample_associates(associate_count)
+    Args:
+        associate_count: Number of associates to schedule.
+        output_path: Optional PDF file path for output.
+        realistic: Use realistic shift distribution.
+        seed: Random seed for reproducibility.
+    """
+    schedule_date = date.today()
+
+    # Create shift start configs for realistic mode
+    if realistic:
+        base_distribution = ShiftStartConfig.create_standard_distribution()
+        if associate_count != 47:  # 47 is the standard total
+            shift_start_configs = ShiftStartConfig.scale_distribution(
+                base_distribution, associate_count
+            )
+        else:
+            shift_start_configs = base_distribution
+
+        # Create associates matching the distribution
+        associates = create_realistic_associates(
+            shift_start_configs, [schedule_date], seed=seed
+        )
+        associate_count = len(associates)
+
+        print(f"Generating demo schedule for {associate_count} associates...")
+        print(f"  Mode: REALISTIC (real shift distribution)")
+        print(f"  Shift starts: ", end="")
+        for cfg in shift_start_configs:
+            print(f"{cfg.label}:{cfg.target_count} ", end="")
+        print()
+    else:
+        print(f"Generating demo schedule for {associate_count} associates...")
+
+        # Create sample associates
+        associates = create_sample_associates(
+            associate_count, [schedule_date], seed=seed
+        )
 
     # Create schedule request
     request = ScheduleRequest(
-        schedule_date=date.today(),
+        schedule_date=schedule_date,
         associates=associates,
         is_busy_day=False,
     )
@@ -812,6 +851,8 @@ def main() -> int:
 Examples:
   %(prog)s demo                       Run daily demo with 10 associates
   %(prog)s demo --count 30            Run daily demo with 30 associates
+  %(prog)s demo --realistic           Use real shift distribution
+  %(prog)s demo --realistic --count 50  Scale realistic distribution to 50
   %(prog)s demo --output sched.pdf    Generate PDF output
 
   %(prog)s weekly-demo                Run weekly demo with 10 associates
@@ -840,6 +881,16 @@ Examples:
         "--output", "-o",
         type=str,
         help="Output PDF file path",
+    )
+    demo_parser.add_argument(
+        "--realistic", "-r",
+        action="store_true",
+        help="Use realistic shift distribution",
+    )
+    demo_parser.add_argument(
+        "--seed", "-S",
+        type=int,
+        help="Random seed for reproducibility",
     )
 
     # Weekly demo command
@@ -957,7 +1008,7 @@ Examples:
     args = parser.parse_args()
 
     if args.command == "demo":
-        run_demo(args.count, args.output)
+        run_demo(args.count, args.output, args.realistic, args.seed)
         return 0
     elif args.command == "weekly-demo":
         run_weekly_demo(
