@@ -117,6 +117,52 @@ ogphelper weekly-demo --pattern one_weekend_day   # At least one weekend day off
 ogphelper weekly-demo --pattern every_other_day   # Work every other day max
 ```
 
+### Schedule Variety and Shift Limits
+
+```bash
+# Control schedule variety (low, medium, high)
+ogphelper weekly-demo --variety high              # Maximum diversity in shifts/days off
+ogphelper weekly-demo --variety low               # More uniform schedules
+
+# Set random seed for reproducible results
+ogphelper weekly-demo --count 30 --seed 12345
+
+# Limit associates per shift block (5 AM - 11 AM, 10 AM - 4 PM, 3 PM - 10 PM)
+ogphelper weekly-demo --count 40 --morning-limit 15 --closing-limit 10
+ogphelper weekly-demo --morning-limit 20 --day-limit 15 --closing-limit 15
+
+# Combine variety, limits, and output
+ogphelper weekly-demo \
+  --count 50 \
+  --variety high \
+  --seed 42 \
+  --morning-limit 20 \
+  --closing-limit 15 \
+  --output variety_schedule.pdf
+```
+
+### Realistic Mode (Production-Like Schedules)
+
+Uses real-world shift start distribution (9@5AM, 7@6AM, 5@7AM, 2@8AM, 1@8:30AM, 5@9AM, 1@9:30AM, 3@10AM, 6@11AM, 3@1PM, 5@2PM):
+
+```bash
+# Standard realistic mode (47 associates matching real distribution)
+ogphelper weekly-demo --realistic
+
+# Scale distribution to different team sizes
+ogphelper weekly-demo --realistic --count 80    # Scales up proportionally
+ogphelper weekly-demo --realistic --count 20    # Scales down, drops low-count times
+ogphelper weekly-demo --realistic --count 5     # Minimal team, 5 start times
+
+# Realistic mode with PDF output
+ogphelper weekly-demo --realistic --count 47 --output realistic_schedule.pdf
+
+# Realistic mode produces full-time schedules:
+#   - Avg Hours/Associate: ~35
+#   - Avg Days/Associate: 5
+#   - Each associate has exactly 2 days off built into their availability
+```
+
 ### Demand-Aware Scheduling
 
 ```bash
@@ -190,13 +236,14 @@ Default break duration: 15 minutes each.
 
 ### Job Roles
 
-| Role | Default Cap |
-|------|-------------|
-| Picking | Unlimited (overflow) |
-| GMD/SM | 2 |
-| Exception/SM | 2 |
-| Staging | 2 |
-| Backroom | 8 |
+| Role | Default Cap | Description |
+|------|-------------|-------------|
+| Picking | Unlimited | Primary overflow role |
+| GMD/SM | 2 | General Merchandise Dispensing supervisor |
+| Exception/SM | 2 | Exception handling supervisor |
+| Staging | 2 | Order staging |
+| Backroom | 8 | Backroom operations |
+| S/R | 2 | Seasonal and Regulated items |
 
 ### Associate Constraints
 
@@ -369,6 +416,7 @@ request = ScheduleRequest(
         JobRole.EXCEPTION_SM: 3,    # Max 3 per slot
         JobRole.STAGING: 4,         # Max 4 per slot
         JobRole.BACKROOM: 12,       # Max 12 per slot
+        JobRole.SR: 2,              # Max 2 per slot (Seasonal/Regulated)
     },
 )
 ```
