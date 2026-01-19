@@ -548,7 +548,10 @@ class ScheduleRequest:
         day_start_minutes: Minutes from midnight when schedule day starts (default 5 AM).
         day_end_minutes: Minutes from midnight when schedule day ends (default 10 PM).
         slot_minutes: Duration of each time slot in minutes.
-        job_caps: Maximum associates per role per slot.
+        job_caps: Default maximum associates per role per slot.
+        time_based_job_caps: Optional time-based caps (slot -> role -> cap).
+            Overrides job_caps for specific slots. Use to specify when roles
+            should start (e.g., staging starts at 8 AM with cap > 0).
         is_busy_day: If True, allow more aggressive lunch shifting.
         shift_block_configs: Optional shift block configurations with capacity limits.
     """
@@ -563,14 +566,33 @@ class ScheduleRequest:
             JobRole.PICKING: 999,  # Effectively unlimited
             JobRole.GMD_SM: 1,
             JobRole.EXCEPTION_SM: 1,
-            JobRole.STAGING: 2,  # Cap only - assignment logic avoids early use
-            JobRole.BACKROOM: 2,  # Cap only - assignment logic avoids early use
+            JobRole.STAGING: 2,
+            JobRole.BACKROOM: 2,
             JobRole.SR: 1,
         }
     )
+    time_based_job_caps: Optional[dict[int, dict[JobRole, int]]] = None
     is_busy_day: bool = False
     shift_block_configs: Optional[list[ShiftBlockConfig]] = None
     shift_start_configs: Optional[list[ShiftStartConfig]] = None
+
+    def get_job_cap(self, slot: int, role: JobRole) -> int:
+        """Get the job cap for a role at a specific slot.
+
+        Checks time_based_job_caps first, then falls back to job_caps.
+
+        Args:
+            slot: The time slot index.
+            role: The job role.
+
+        Returns:
+            Maximum associates allowed for this role at this slot.
+        """
+        if self.time_based_job_caps and slot in self.time_based_job_caps:
+            slot_caps = self.time_based_job_caps[slot]
+            if role in slot_caps:
+                return slot_caps[role]
+        return self.job_caps.get(role, 999)
 
     def get_shift_block_for_slot(self, slot: int) -> Optional[ShiftBlockConfig]:
         """Get the shift block configuration for a given start slot."""
@@ -696,7 +718,8 @@ class WeeklyScheduleRequest:
         day_start_minutes: Minutes from midnight when schedule day starts.
         day_end_minutes: Minutes from midnight when schedule day ends.
         slot_minutes: Duration of each time slot in minutes.
-        job_caps: Maximum associates per role per slot.
+        job_caps: Default maximum associates per role per slot.
+        time_based_job_caps: Optional time-based caps (slot -> role -> cap).
         busy_days: Set of dates that are considered busy days.
         days_off_pattern: Pattern for distributing days off.
         required_days_off: Minimum number of days off per associate per week.
@@ -715,11 +738,12 @@ class WeeklyScheduleRequest:
             JobRole.PICKING: 999,
             JobRole.GMD_SM: 1,
             JobRole.EXCEPTION_SM: 1,
-            JobRole.STAGING: 2,  # Cap only - assignment logic avoids early use
-            JobRole.BACKROOM: 2,  # Cap only - assignment logic avoids early use
+            JobRole.STAGING: 2,
+            JobRole.BACKROOM: 2,
             JobRole.SR: 1,
         }
     )
+    time_based_job_caps: Optional[dict[int, dict[JobRole, int]]] = None
     busy_days: set[date] = field(default_factory=set)
     days_off_pattern: DaysOffPattern = DaysOffPattern.TWO_CONSECUTIVE
     required_days_off: int = 2
@@ -760,6 +784,7 @@ class WeeklyScheduleRequest:
             day_end_minutes=self.day_end_minutes,
             slot_minutes=self.slot_minutes,
             job_caps=self.job_caps,
+            time_based_job_caps=self.time_based_job_caps,
             is_busy_day=self.is_busy_day(schedule_date),
             shift_block_configs=self.shift_block_configs,
             shift_start_configs=self.shift_start_configs,
