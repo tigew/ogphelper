@@ -419,13 +419,16 @@ class HeuristicSolver:
         breaks = []
         used_slots = set()
 
+        # Get max variance from policy (default 2 slots = 30 min)
+        max_variance = self.break_policy.get_max_break_variance_slots()
+
         # Add lunch slots to used set
         if lunch_block:
             for slot in range(lunch_block.start_slot, lunch_block.end_slot):
                 used_slots.add(slot)
 
         for target in targets:
-            # Find best position near target
+            # Find best position near target, limited to max variance
             best_start = self._find_best_break_position(
                 target,
                 break_slots,
@@ -433,6 +436,7 @@ class HeuristicSolver:
                 candidate.end_slot,
                 used_slots,
                 slot_states,
+                search_radius=max_variance,
             )
 
             break_block = ScheduleBlock(
@@ -478,12 +482,13 @@ class HeuristicSolver:
                 continue
 
             # Score this position
+            # Strongly prefer the exact midpoint with heavy distance penalty
             score = 0.0
             for slot in range(start, end):
                 # Prefer high coverage (less impact)
-                score += slot_states[slot].on_floor_count
-                # Small penalty for distance from target
-                score -= abs(offset) * 0.1
+                score += slot_states[slot].on_floor_count * 0.1
+            # Heavy penalty for distance from midpoint (prioritize exact placement)
+            score -= abs(offset) * 10.0
 
             if score > best_score:
                 best_score = score

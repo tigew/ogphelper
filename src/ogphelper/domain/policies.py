@@ -112,6 +112,15 @@ class BreakPolicy(ABC):
         """
         pass
 
+    @abstractmethod
+    def get_max_break_variance_slots(self) -> int:
+        """Get maximum allowed variance from ideal break position in slots.
+
+        Returns:
+            Maximum number of slots a break can deviate from the ideal midpoint.
+        """
+        pass
+
 
 @dataclass
 class DefaultShiftPolicy(ShiftPolicy):
@@ -221,19 +230,23 @@ class DefaultBreakPolicy(BreakPolicy):
 
     Break duration: 15 minutes each (configurable)
 
-    Break placement: Target 1/3 and 2/3 points of work period,
-    avoiding overlap with lunch.
+    Break placement: Target midpoint of each work segment (before lunch
+    and after lunch), with maximum variance of 30 minutes from ideal.
     """
 
     # Thresholds in minutes
     one_break_threshold: int = 300  # 5 hours
-    two_break_threshold: int = 480  # 8 hours
+    two_break_threshold: int = 420  # 7 hours
 
     # Break duration in minutes
     break_duration: int = 15
 
     # Minimum gap from lunch (in slots)
     min_gap_from_lunch_slots: int = 2
+
+    # Maximum variance from ideal midpoint position (in slots)
+    # 2 slots = 30 minutes max variance from the exact midpoint
+    max_break_variance_slots: int = 2
 
     def get_break_count(self, work_minutes: int) -> int:
         if work_minutes >= self.two_break_threshold:
@@ -242,6 +255,10 @@ class DefaultBreakPolicy(BreakPolicy):
             return 1
         else:
             return 0
+
+    def get_max_break_variance_slots(self) -> int:
+        """Return maximum allowed variance from ideal break position in slots."""
+        return self.max_break_variance_slots
 
     def get_break_duration(self) -> int:
         return self.break_duration
