@@ -484,6 +484,8 @@ class WeeklyScheduler:
                 slot_minutes=request.slot_minutes,
                 job_caps=request.job_caps,
                 is_busy_day=request.is_busy_day(schedule_date),
+                shift_block_configs=request.shift_block_configs,
+                shift_start_configs=request.shift_start_configs,
             )
 
             # Generate candidates with fairness-aware scoring

@@ -139,7 +139,7 @@ class ShiftStartConfig:
             target_total: Target total number of associates.
 
         Returns:
-            Scaled distribution.
+            Scaled distribution with configs that have 0 target_count filtered out.
         """
         current_total = sum(cfg.target_count for cfg in base)
         if current_total == 0:
@@ -149,21 +149,42 @@ class ShiftStartConfig:
         scaled = []
         running_total = 0
 
-        for i, cfg in enumerate(base):
-            if i == len(base) - 1:
-                # Last one gets remainder to ensure exact total
-                new_count = max(1, target_total - running_total)
-            else:
-                new_count = max(1, round(cfg.target_count * scale_factor))
-                running_total += new_count
+        # First pass: calculate proportional counts (allowing 0)
+        proportional_counts = []
+        for cfg in base:
+            new_count = round(cfg.target_count * scale_factor)
+            proportional_counts.append((cfg, new_count))
 
-            scaled.append(cls(
-                start_slot=cfg.start_slot,
-                target_count=new_count,
-                min_count=max(0, new_count - 1),
-                max_count=new_count + 2,  # Allow some flexibility
-                label=cfg.label,
-            ))
+        # Distribute remainder to match target_total exactly
+        total_so_far = sum(c for _, c in proportional_counts)
+        remainder = target_total - total_so_far
+
+        # Add remainder to configs with highest original proportions
+        if remainder != 0:
+            # Sort by original target_count (descending) to prioritize high-volume times
+            sorted_indices = sorted(
+                range(len(proportional_counts)),
+                key=lambda i: base[i].target_count,
+                reverse=True
+            )
+            for i in range(abs(remainder)):
+                idx = sorted_indices[i % len(sorted_indices)]
+                cfg, count = proportional_counts[idx]
+                if remainder > 0:
+                    proportional_counts[idx] = (cfg, count + 1)
+                elif count > 0:  # Only decrease if > 0
+                    proportional_counts[idx] = (cfg, count - 1)
+
+        # Build final list, filtering out 0-count configs
+        for cfg, new_count in proportional_counts:
+            if new_count > 0:
+                scaled.append(cls(
+                    start_slot=cfg.start_slot,
+                    target_count=new_count,
+                    min_count=max(0, new_count - 1),
+                    max_count=new_count + 2,  # Allow some flexibility
+                    label=cfg.label,
+                ))
 
         return scaled
 
