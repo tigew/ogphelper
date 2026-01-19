@@ -40,6 +40,7 @@ class SlotState:
     on_floor_count: int = 0
     on_lunch_count: int = 0
     on_break_count: int = 0
+    lunch_start_count: int = 0  # How many lunches START at this exact slot
     role_counts: dict[JobRole, int] = field(
         default_factory=lambda: {role: 0 for role in JobRole}
     )
@@ -167,6 +168,8 @@ class HeuristicSolver:
                 for slot in range(lunch_block.start_slot, lunch_block.end_slot):
                     slot_states[slot].on_lunch_count += 1
                     slot_states[slot].on_floor_count -= 1
+                # Track lunch START position specifically for staggering
+                slot_states[lunch_block.start_slot].lunch_start_count += 1
 
             # Place breaks if needed
             if candidate.break_count > 0:
@@ -332,10 +335,11 @@ class HeuristicSolver:
         is_busy_day: bool,
         day_start_minutes: int = 300,  # Default 5AM
     ) -> ScheduleBlock:
-        """Place lunch to minimize coverage impact.
+        """Place lunch with consistent 15-minute staggering across all associates.
 
-        Tries to place lunch when other associates are also on lunch
-        or when coverage is highest.
+        Uses lunch_start_count to track exactly where lunches BEGIN, ensuring
+        even distribution across 15-minute intervals. This prevents clustering
+        where many associates have lunches starting at the same time.
         """
         lunch_slots = candidate.lunch_slots
         slot_minutes = candidate.slot_minutes
@@ -353,10 +357,6 @@ class HeuristicSolver:
             slot_minutes,
         )
 
-        # Find best position within window
-        best_start = earliest
-        best_score = float("-inf")
-
         # Calculate target (roughly 4 hours into shift for 8-hour shifts)
         shift_length = candidate.end_slot - candidate.start_slot
         mid_point = candidate.start_slot + shift_length // 2
@@ -369,22 +369,34 @@ class HeuristicSolver:
         else:
             loop_start = earliest
 
-        # Use 30-min stagger pattern for all associates
-        # This creates overlapping lunch groups: 9:00, 9:30, 10:00, etc.
-        # With 50 associates, this is necessary to fit everyone without early lunches
-        stagger_slots = 2  # 30 min with 15-min slots
-        for start in range(loop_start, latest + 1, stagger_slots):
+        # Find best position using 15-minute (1-slot) staggering
+        # Primary criterion: fewest lunches starting at this exact slot
+        # Secondary criterion: lower overlap with existing lunches
+        # Tertiary criterion: closer to target time
+        best_start = loop_start
+        best_score = float("-inf")
+
+        for start in range(loop_start, latest + 1):
             end = start + lunch_slots
             if end > candidate.end_slot:
                 break
 
-            # Score based on how many lunches already at this exact position
-            # (allows some grouping at each 30-min slot)
-            lunches_at_position = sum(
-                slot_states[slot].on_lunch_count for slot in range(start, end)
-            ) // lunch_slots  # Average lunches per slot
+            # Primary: strongly prefer slots with fewer lunches STARTING here
+            # This ensures true 15-minute staggering
+            lunches_starting_here = slot_states[start].lunch_start_count
+            start_score = -lunches_starting_here * 100.0
 
-            score = -lunches_at_position * 5.0  # Prefer less crowded slots
+            # Secondary: slight preference for lower overlap (coverage consideration)
+            overlap_count = sum(
+                slot_states[slot].on_lunch_count for slot in range(start, end)
+            )
+            overlap_score = -overlap_count * 1.0
+
+            # Tertiary: slight preference for being closer to target
+            distance_from_target = abs(start - target)
+            distance_score = -distance_from_target * 0.5
+
+            score = start_score + overlap_score + distance_score
 
             if score > best_score:
                 best_score = score
