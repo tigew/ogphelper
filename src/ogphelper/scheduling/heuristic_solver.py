@@ -563,8 +563,10 @@ class HeuristicSolver:
         2. Assign Picking as overflow
         3. Respect caps and eligibility
         4. Use slot-specific caps when available (e.g., 5AM staffing)
-        5. For 5AM starters (shift starts in slots 0-3), preserve initial role
-           throughout the entire shift to maintain consistency.
+        5. For specialized roles (GMD/SM, Exception/SM, S/R, Backroom),
+           preserve the role throughout the entire shift once assigned.
+           These roles require area-specific knowledge and switching
+           between them and picking is disruptive.
         """
         eligible_roles = associate.eligible_roles()
         if not eligible_roles:
@@ -575,15 +577,22 @@ class HeuristicSolver:
 
         assignments = []
 
-        # Check if this is a 5AM starter (shift starts in slots 0-3)
-        is_5am_starter = candidate.start_slot < 4
+        # Roles that should persist throughout the shift once assigned
+        # (switching between these and picking is disruptive)
+        persistent_roles = {
+            JobRole.GMD_SM,
+            JobRole.EXCEPTION_SM,
+            JobRole.SR,
+            JobRole.BACKROOM,
+        }
+
         initial_role: Optional[JobRole] = None
 
         for period in work_periods:
             role: Optional[JobRole] = None
 
-            # For 5AM starters, try to preserve the initial role
-            if is_5am_starter and initial_role is not None:
+            # If we have an initial role that should persist, try to preserve it
+            if initial_role is not None and initial_role in persistent_roles:
                 role = self._try_preserve_role(
                     initial_role, period, eligible_roles, slot_states,
                     job_caps, slot_range_caps
@@ -602,8 +611,8 @@ class HeuristicSolver:
                 for slot in range(period.start_slot, period.end_slot):
                     slot_states[slot].role_counts[role] += 1
 
-                # Track initial role for 5AM starters
-                if is_5am_starter and initial_role is None:
+                # Track initial role for persistence
+                if initial_role is None:
                     initial_role = role
 
         return assignments
