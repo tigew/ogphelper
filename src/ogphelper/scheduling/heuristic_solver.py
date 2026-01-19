@@ -586,17 +586,26 @@ class HeuristicSolver:
             JobRole.BACKROOM,
         }
 
+        # 5AM starters (slot < 4) are "extra special" - they keep their initial
+        # role ALL DAY, even if it's Picking. This is because 5AM has very limited
+        # specialized role slots, so those who start as pickers must stay pickers.
+        is_5am_starter = candidate.start_slot < 4
+
         initial_role: Optional[JobRole] = None
 
         for period in work_periods:
             role: Optional[JobRole] = None
 
             # If we have an initial role that should persist, try to preserve it
-            if initial_role is not None and initial_role in persistent_roles:
-                role = self._try_preserve_role(
-                    initial_role, period, eligible_roles, slot_states,
-                    job_caps, slot_range_caps
-                )
+            # - 5AM starters: preserve ANY role (including Picking)
+            # - Other starters: only preserve specialized roles
+            if initial_role is not None:
+                should_persist = is_5am_starter or initial_role in persistent_roles
+                if should_persist:
+                    role = self._try_preserve_role(
+                        initial_role, period, eligible_roles, slot_states,
+                        job_caps, slot_range_caps
+                    )
 
             # If not preserving (or couldn't preserve), select normally
             if role is None:
