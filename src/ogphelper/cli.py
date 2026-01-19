@@ -241,7 +241,8 @@ def create_realistic_associates(
     """Create associates that match a realistic shift start distribution.
 
     Each associate's availability is set to match one of the shift start times,
-    with appropriate end times (8-hour shifts by default).
+    with appropriate end times (8-hour shifts by default). Most associates
+    work 5 days/week (full-time) with only 2 days off.
 
     Args:
         shift_start_configs: List of shift start configurations with target counts.
@@ -263,34 +264,49 @@ def create_realistic_associates(
         "Gina", "Hugo", "Iris", "Jake", "Kim", "Luke", "Maya", "Nate",
     ]
 
-    # Days off patterns for variety
+    # Days off patterns - exactly 2 days off per week for full-time
+    # Shuffle the patterns to distribute days off across the week
     days_off_patterns = [
-        [5, 6], [0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [6, 0],
-        [0, 3], [2, 5], [1, 4], [0, 4], [2, 6],
+        [5, 6],  # Sat-Sun off
+        [0, 1],  # Mon-Tue off
+        [1, 2],  # Tue-Wed off
+        [2, 3],  # Wed-Thu off
+        [3, 4],  # Thu-Fri off
+        [4, 5],  # Fri-Sat off
+        [6, 0],  # Sun-Mon off
+        [0, 3],  # Mon, Thu off (split)
+        [2, 5],  # Wed, Sat off (split)
+        [1, 4],  # Tue, Fri off (split)
+        [0, 4],  # Mon, Fri off (split)
+        [2, 6],  # Wed, Sun off (split)
+        [1, 5],  # Tue, Sat off (split)
+        [3, 6],  # Thu, Sun off (split)
     ]
 
-    # Role restrictions for variety
+    # Role restrictions for variety (most have no restrictions)
     role_restrictions = [
-        set(),  # No restrictions
+        set(),  # No restrictions (most common)
+        set(),
+        set(),
+        set(),
+        set(),
         {JobRole.BACKROOM},
         {JobRole.GMD_SM},
         {JobRole.STAGING},
         {JobRole.SR},
-        set(),
-        set(),
-        set(),  # Weight towards no restrictions
     ]
 
     # Role preferences for variety
     preference_combos = [
+        {},  # Neutral (most common)
+        {},
+        {},
         {},
         {JobRole.PICKING: Preference.PREFER},
         {JobRole.BACKROOM: Preference.PREFER},
         {JobRole.STAGING: Preference.PREFER},
         {JobRole.BACKROOM: Preference.AVOID},
         {JobRole.SR: Preference.PREFER},
-        {},
-        {},  # Weight towards neutral
     ]
 
     associate_idx = 0
@@ -306,34 +322,30 @@ def create_realistic_associates(
             start_slot = cfg.start_slot
             end_slot = min(start_slot + 32, 68)  # Cap at 10 PM
 
-            # For closers, extend availability
+            # For closers, extend availability to end of day
             if start_slot >= 36:  # 2 PM or later
                 end_slot = 68  # Available until 10 PM
 
-            # Select days off pattern
-            preferred_days_off = rng.choice(days_off_patterns)
+            # Select days off pattern - rotate through patterns to ensure coverage
+            # Use index-based selection first, then randomize for duplicates
+            pattern_idx = associate_idx % len(days_off_patterns)
+            preferred_days_off = days_off_patterns[pattern_idx]
+
             cannot_do = rng.choice(role_restrictions)
             preferences = rng.choice(preference_combos)
 
-            # Build availability for each date
+            # Build availability for each date - most days should be available
             availability = {}
             for d in schedule_dates:
                 weekday = d.weekday()
                 is_day_off = weekday in preferred_days_off
 
-                # Add some randomization to days off
-                if not is_day_off and rng.random() < 0.1:
-                    is_day_off = True
-
                 if is_day_off:
                     availability[d] = Availability.off_day()
                 else:
-                    # Small jitter to start time for realism
-                    jitter = rng.choice([-2, 0, 0, 0, 2])  # Weight towards no jitter
-                    actual_start = max(0, start_slot + jitter)
-                    actual_end = min(68, end_slot + jitter)
+                    # Use exact start time to match shift start configs
                     availability[d] = Availability(
-                        start_slot=actual_start, end_slot=actual_end
+                        start_slot=start_slot, end_slot=end_slot
                     )
 
             allowed_roles = set(JobRole)
@@ -471,13 +483,19 @@ def run_weekly_demo(
         )
 
     # Parse days-off pattern
-    pattern_map = {
-        "none": DaysOffPattern.NONE,
-        "two_consecutive": DaysOffPattern.TWO_CONSECUTIVE,
-        "one_weekend_day": DaysOffPattern.ONE_WEEKEND_DAY,
-        "every_other_day": DaysOffPattern.EVERY_OTHER_DAY,
-    }
-    pattern = pattern_map.get(days_off_pattern, DaysOffPattern.TWO_CONSECUTIVE)
+    # In realistic mode, days off are already built into associate availability
+    if realistic:
+        pattern = DaysOffPattern.NONE
+        required_days_off = 0
+    else:
+        pattern_map = {
+            "none": DaysOffPattern.NONE,
+            "two_consecutive": DaysOffPattern.TWO_CONSECUTIVE,
+            "one_weekend_day": DaysOffPattern.ONE_WEEKEND_DAY,
+            "every_other_day": DaysOffPattern.EVERY_OTHER_DAY,
+        }
+        pattern = pattern_map.get(days_off_pattern, DaysOffPattern.TWO_CONSECUTIVE)
+        required_days_off = 2
 
     # Create shift block configurations if limits specified (only for non-realistic mode)
     shift_block_configs = None
@@ -515,19 +533,22 @@ def run_weekly_demo(
               f"day={day_limit or 'unlimited'}, closing={closing_limit or 'unlimited'}")
 
     # Create weekly schedule request
+    # Note: In realistic mode, shift_start_configs are used to create associates but
+    # NOT passed as constraints to the scheduler, since the targets represent total
+    # workforce distribution, not per-day constraints (associates have days off)
     request = WeeklyScheduleRequest(
         start_date=start_date,
         end_date=end_date,
         associates=associates,
         days_off_pattern=pattern,
-        required_days_off=2,
+        required_days_off=required_days_off,
         fairness_config=FairnessConfig(
             weight_hours_balance=0.7,
             weight_days_balance=0.3,
             max_hours_variance=120.0,  # 2 hours variance allowed
         ),
         shift_block_configs=shift_block_configs,
-        shift_start_configs=shift_start_configs,
+        shift_start_configs=None if realistic else shift_start_configs,
     )
 
     # Generate schedule

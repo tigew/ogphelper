@@ -245,7 +245,7 @@ class HeuristicSolver:
                 # Check shift start time capacity limit
                 if shift_start_configs and start_state:
                     start_cfg = start_config_by_slot.get(candidate.start_slot)
-                    if start_cfg:
+                    if start_cfg and start_cfg.max_count is not None:
                         current_count = start_state.get_count(candidate.start_slot)
                         if current_count >= start_cfg.max_count:
                             # This start time is at capacity, skip this candidate
