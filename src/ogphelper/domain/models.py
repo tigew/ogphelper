@@ -24,6 +24,235 @@ class DaysOffPattern(Enum):
     CUSTOM = "custom"  # Custom pattern defined elsewhere
 
 
+class ShiftBlockType(Enum):
+    """Types of shift blocks for capacity planning.
+
+    These represent different time periods of the day with
+    potentially different staffing requirements.
+    """
+
+    MORNING = "morning"  # Early shifts (e.g., 5 AM - 11 AM)
+    DAY = "day"  # Mid-day shifts (e.g., 10 AM - 4 PM)
+    CLOSING = "closing"  # Late shifts (e.g., 3 PM - 10 PM)
+
+
+@dataclass
+class ShiftStartConfig:
+    """Configuration for a specific shift start time with target count.
+
+    Attributes:
+        start_slot: The slot index when the shift starts.
+        target_count: Target number of associates to start at this time.
+        min_count: Minimum associates who should start at this time.
+        max_count: Maximum associates who can start at this time.
+        label: Human-readable label (e.g., "5:00 AM").
+    """
+
+    start_slot: int
+    target_count: int
+    min_count: int = 0
+    max_count: Optional[int] = None  # None means use target_count as max
+    label: str = ""
+
+    def __post_init__(self):
+        if self.max_count is None:
+            self.max_count = self.target_count
+        if not self.label:
+            # Generate label from slot
+            minutes = 300 + self.start_slot * 15  # Assuming 5 AM start, 15 min slots
+            hours, mins = divmod(minutes, 60)
+            self.label = f"{hours}:{mins:02d}"
+
+    @classmethod
+    def from_time(
+        cls,
+        hour: int,
+        minute: int,
+        target_count: int,
+        min_count: int = 0,
+        max_count: Optional[int] = None,
+        slot_minutes: int = 15,
+        day_start_minutes: int = 300,  # 5 AM
+    ) -> "ShiftStartConfig":
+        """Create a shift start config from a time.
+
+        Args:
+            hour: Hour (24-hour format).
+            minute: Minute.
+            target_count: Target number of associates.
+            min_count: Minimum associates.
+            max_count: Maximum associates (defaults to target_count).
+            slot_minutes: Duration of each slot in minutes.
+            day_start_minutes: Minutes from midnight when schedule starts.
+        """
+        time_minutes = hour * 60 + minute
+        start_slot = (time_minutes - day_start_minutes) // slot_minutes
+        label = f"{hour}:{minute:02d} {'AM' if hour < 12 else 'PM'}"
+        if hour > 12:
+            label = f"{hour - 12}:{minute:02d} PM"
+        elif hour == 12:
+            label = f"12:{minute:02d} PM"
+
+        return cls(
+            start_slot=start_slot,
+            target_count=target_count,
+            min_count=min_count,
+            max_count=max_count,
+            label=label,
+        )
+
+    @classmethod
+    def create_standard_distribution(cls) -> list["ShiftStartConfig"]:
+        """Create standard shift start distribution based on typical retail schedule.
+
+        Returns a list representing:
+        - 9 at 5:00 AM, 7 at 6:00 AM, 5 at 7:00 AM
+        - 2 at 8:00 AM, 1 at 8:30 AM
+        - 5 at 9:00 AM, 1 at 9:30 AM
+        - 3 at 10:00 AM, 6 at 11:00 AM
+        - 3 at 1:00 PM, 5 at 2:00 PM
+        """
+        return [
+            cls.from_time(5, 0, 9),    # 9 at 5:00 AM
+            cls.from_time(6, 0, 7),    # 7 at 6:00 AM
+            cls.from_time(7, 0, 5),    # 5 at 7:00 AM
+            cls.from_time(8, 0, 2),    # 2 at 8:00 AM
+            cls.from_time(8, 30, 1),   # 1 at 8:30 AM
+            cls.from_time(9, 0, 5),    # 5 at 9:00 AM
+            cls.from_time(9, 30, 1),   # 1 at 9:30 AM
+            cls.from_time(10, 0, 3),   # 3 at 10:00 AM
+            cls.from_time(11, 0, 6),   # 6 at 11:00 AM
+            cls.from_time(13, 0, 3),   # 3 at 1:00 PM
+            cls.from_time(14, 0, 5),   # 5 at 2:00 PM
+        ]
+
+    @classmethod
+    def scale_distribution(
+        cls,
+        base: list["ShiftStartConfig"],
+        target_total: int,
+    ) -> list["ShiftStartConfig"]:
+        """Scale a distribution to a target total while maintaining proportions.
+
+        Args:
+            base: Base distribution to scale.
+            target_total: Target total number of associates.
+
+        Returns:
+            Scaled distribution with configs that have 0 target_count filtered out.
+        """
+        current_total = sum(cfg.target_count for cfg in base)
+        if current_total == 0:
+            return base
+
+        scale_factor = target_total / current_total
+        scaled = []
+        running_total = 0
+
+        # First pass: calculate proportional counts (allowing 0)
+        proportional_counts = []
+        for cfg in base:
+            new_count = round(cfg.target_count * scale_factor)
+            proportional_counts.append((cfg, new_count))
+
+        # Distribute remainder to match target_total exactly
+        total_so_far = sum(c for _, c in proportional_counts)
+        remainder = target_total - total_so_far
+
+        # Add remainder to configs with highest original proportions
+        if remainder != 0:
+            # Sort by original target_count (descending) to prioritize high-volume times
+            sorted_indices = sorted(
+                range(len(proportional_counts)),
+                key=lambda i: base[i].target_count,
+                reverse=True
+            )
+            for i in range(abs(remainder)):
+                idx = sorted_indices[i % len(sorted_indices)]
+                cfg, count = proportional_counts[idx]
+                if remainder > 0:
+                    proportional_counts[idx] = (cfg, count + 1)
+                elif count > 0:  # Only decrease if > 0
+                    proportional_counts[idx] = (cfg, count - 1)
+
+        # Build final list, filtering out 0-count configs
+        for cfg, new_count in proportional_counts:
+            if new_count > 0:
+                scaled.append(cls(
+                    start_slot=cfg.start_slot,
+                    target_count=new_count,
+                    min_count=max(0, new_count - 1),
+                    max_count=new_count + 2,  # Allow some flexibility
+                    label=cfg.label,
+                ))
+
+        return scaled
+
+
+@dataclass
+class ShiftBlockConfig:
+    """Configuration for a shift block with capacity limits.
+
+    Attributes:
+        block_type: The type of shift block.
+        start_slot: First slot of this block (inclusive).
+        end_slot: Last slot of this block (exclusive).
+        min_associates: Minimum associates who should start in this block.
+        max_associates: Maximum associates who can start in this block.
+        target_associates: Target number of associates for this block.
+    """
+
+    block_type: ShiftBlockType
+    start_slot: int
+    end_slot: int
+    min_associates: int = 0
+    max_associates: int = 999
+    target_associates: Optional[int] = None
+
+    @classmethod
+    def create_default_blocks(
+        cls,
+        slot_minutes: int = 15,
+        day_start_minutes: int = 300,  # 5 AM
+    ) -> list["ShiftBlockConfig"]:
+        """Create default shift block configurations.
+
+        Default blocks:
+        - Morning: 5 AM - 11 AM (associates starting in this window)
+        - Day: 10 AM - 4 PM (associates starting in this window)
+        - Closing: 3 PM - 10 PM (associates starting in this window)
+        """
+        # Calculate slot indices
+        morning_start = 0  # 5 AM
+        morning_end = (11 * 60 - day_start_minutes) // slot_minutes  # 11 AM
+        day_start = (10 * 60 - day_start_minutes) // slot_minutes  # 10 AM
+        day_end = (16 * 60 - day_start_minutes) // slot_minutes  # 4 PM
+        closing_start = (15 * 60 - day_start_minutes) // slot_minutes  # 3 PM
+        closing_end = (22 * 60 - day_start_minutes) // slot_minutes  # 10 PM
+
+        return [
+            cls(
+                block_type=ShiftBlockType.MORNING,
+                start_slot=morning_start,
+                end_slot=morning_end,
+            ),
+            cls(
+                block_type=ShiftBlockType.DAY,
+                start_slot=day_start,
+                end_slot=day_end,
+            ),
+            cls(
+                block_type=ShiftBlockType.CLOSING,
+                start_slot=closing_start,
+                end_slot=closing_end,
+            ),
+        ]
+
+    def contains_slot(self, slot: int) -> bool:
+        """Check if a slot falls within this block."""
+        return self.start_slot <= slot < self.end_slot
+
+
 class JobRole(Enum):
     """Available job roles for associates."""
 
@@ -32,6 +261,7 @@ class JobRole(Enum):
     EXCEPTION_SM = "exception_sm"
     STAGING = "staging"
     BACKROOM = "backroom"
+    SR = "sr"  # Seasonal and Regulated
 
 
 class Preference(Enum):
@@ -320,6 +550,7 @@ class ScheduleRequest:
         slot_minutes: Duration of each time slot in minutes.
         job_caps: Maximum associates per role per slot.
         is_busy_day: If True, allow more aggressive lunch shifting.
+        shift_block_configs: Optional shift block configurations with capacity limits.
     """
 
     schedule_date: date
@@ -334,9 +565,21 @@ class ScheduleRequest:
             JobRole.EXCEPTION_SM: 2,
             JobRole.STAGING: 2,
             JobRole.BACKROOM: 8,
+            JobRole.SR: 2,  # Seasonal and Regulated
         }
     )
     is_busy_day: bool = False
+    shift_block_configs: Optional[list[ShiftBlockConfig]] = None
+    shift_start_configs: Optional[list[ShiftStartConfig]] = None
+
+    def get_shift_block_for_slot(self, slot: int) -> Optional[ShiftBlockConfig]:
+        """Get the shift block configuration for a given start slot."""
+        if not self.shift_block_configs:
+            return None
+        for block in self.shift_block_configs:
+            if block.contains_slot(slot):
+                return block
+        return None
 
     @property
     def total_slots(self) -> int:
@@ -458,6 +701,7 @@ class WeeklyScheduleRequest:
         days_off_pattern: Pattern for distributing days off.
         required_days_off: Minimum number of days off per associate per week.
         fairness_config: Configuration for fairness balancing.
+        shift_block_configs: Optional shift block configurations with capacity limits.
     """
 
     start_date: date
@@ -473,12 +717,15 @@ class WeeklyScheduleRequest:
             JobRole.EXCEPTION_SM: 2,
             JobRole.STAGING: 2,
             JobRole.BACKROOM: 8,
+            JobRole.SR: 2,  # Seasonal and Regulated
         }
     )
     busy_days: set[date] = field(default_factory=set)
     days_off_pattern: DaysOffPattern = DaysOffPattern.TWO_CONSECUTIVE
     required_days_off: int = 2
     fairness_config: FairnessConfig = field(default_factory=FairnessConfig)
+    shift_block_configs: Optional[list[ShiftBlockConfig]] = None
+    shift_start_configs: Optional[list[ShiftStartConfig]] = None
 
     @property
     def total_slots_per_day(self) -> int:
@@ -514,6 +761,8 @@ class WeeklyScheduleRequest:
             slot_minutes=self.slot_minutes,
             job_caps=self.job_caps,
             is_busy_day=self.is_busy_day(schedule_date),
+            shift_block_configs=self.shift_block_configs,
+            shift_start_configs=self.shift_start_configs,
         )
 
 
