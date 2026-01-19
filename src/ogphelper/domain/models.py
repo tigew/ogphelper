@@ -563,9 +563,9 @@ class ScheduleRequest:
             JobRole.PICKING: 999,  # Effectively unlimited
             JobRole.GMD_SM: 1,
             JobRole.EXCEPTION_SM: 1,
-            JobRole.STAGING: 0,  # No staging in morning - ease into needs
-            JobRole.BACKROOM: 0,  # No backroom in morning - ease into needs
-            JobRole.SR: 1,  # Seasonal and Regulated
+            JobRole.STAGING: 2,  # Cap only - assignment logic avoids early use
+            JobRole.BACKROOM: 2,  # Cap only - assignment logic avoids early use
+            JobRole.SR: 1,
         }
     )
     is_busy_day: bool = False
@@ -715,9 +715,9 @@ class WeeklyScheduleRequest:
             JobRole.PICKING: 999,
             JobRole.GMD_SM: 1,
             JobRole.EXCEPTION_SM: 1,
-            JobRole.STAGING: 0,  # No staging in morning - ease into needs
-            JobRole.BACKROOM: 0,  # No backroom in morning - ease into needs
-            JobRole.SR: 1,  # Seasonal and Regulated
+            JobRole.STAGING: 2,  # Cap only - assignment logic avoids early use
+            JobRole.BACKROOM: 2,  # Cap only - assignment logic avoids early use
+            JobRole.SR: 1,
         }
     )
     busy_days: set[date] = field(default_factory=set)
