@@ -227,11 +227,11 @@ class CPSATSolver:
 
             coverage.append(sum(slot_coverage) if slot_coverage else 0)
 
-        # Role cap constraints
+        # Role cap constraints (supports time-based caps)
         for role in JobRole:
-            cap = request.job_caps.get(role, 999)
-            if cap < 999:
-                for slot in range(total_slots):
+            for slot in range(total_slots):
+                cap = request.get_job_cap(slot, role)
+                if cap < 999:
                     role_assignments = []
                     for assoc_id, assoc_candidates in candidates.items():
                         associate = associates_map.get(assoc_id)

@@ -416,11 +416,46 @@ def run_demo(
             associate_count, [schedule_date], seed=seed
         )
 
+    # Create time-based caps for realistic mode: ease into needs
+    # Slot 0 = 5AM, Slot 4 = 6AM, Slot 8 = 7AM, Slot 12 = 8AM, etc.
+    time_based_caps = None
+    if realistic:
+        time_based_caps = {}
+        # 5-7 AM (slots 0-8): No staging/backroom, 1 GMD, 1 Exception, 1 SR
+        for slot in range(8):
+            time_based_caps[slot] = {
+                JobRole.STAGING: 0,
+                JobRole.BACKROOM: 0,
+                JobRole.GMD_SM: 1,
+                JobRole.EXCEPTION_SM: 1,
+                JobRole.SR: 1,
+            }
+        # 7-8 AM (slots 8-12): Start easing in - still no staging/backroom
+        for slot in range(8, 12):
+            time_based_caps[slot] = {
+                JobRole.STAGING: 0,
+                JobRole.BACKROOM: 0,
+                JobRole.GMD_SM: 1,
+                JobRole.EXCEPTION_SM: 1,
+                JobRole.SR: 1,
+            }
+        # 8-9 AM (slots 12-16): Allow 1 staging, still no backroom
+        for slot in range(12, 16):
+            time_based_caps[slot] = {
+                JobRole.STAGING: 1,
+                JobRole.BACKROOM: 0,
+                JobRole.GMD_SM: 1,
+                JobRole.EXCEPTION_SM: 1,
+                JobRole.SR: 1,
+            }
+        # 9+ AM: Use default caps (full staffing available)
+
     # Create schedule request
     request = ScheduleRequest(
         schedule_date=schedule_date,
         associates=associates,
         is_busy_day=False,
+        time_based_job_caps=time_based_caps,
     )
 
     # Generate schedule

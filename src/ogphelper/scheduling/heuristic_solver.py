@@ -181,7 +181,7 @@ class HeuristicSolver:
 
             # Assign job roles
             job_assignments = self._assign_roles(
-                candidate, assignment, associate, slot_states, request.job_caps
+                candidate, assignment, associate, slot_states, request
             )
             assignment.job_assignments = job_assignments
 
@@ -502,7 +502,7 @@ class HeuristicSolver:
         assignment: ShiftAssignment,
         associate: Associate,
         slot_states: list[SlotState],
-        job_caps: dict[JobRole, int],
+        request: "ScheduleRequest",
     ) -> list[JobAssignment]:
         """Assign job roles for each work period in the shift.
 
@@ -523,7 +523,7 @@ class HeuristicSolver:
         for period in work_periods:
             # For simplicity, assign one role per work period
             role = self._select_role_for_period(
-                period, eligible_roles, associate, slot_states, job_caps
+                period, eligible_roles, associate, slot_states, request
             )
             if role:
                 assignments.append(JobAssignment(role=role, block=period))
@@ -576,7 +576,7 @@ class HeuristicSolver:
         eligible_roles: set[JobRole],
         associate: Associate,
         slot_states: list[SlotState],
-        job_caps: dict[JobRole, int],
+        request: "ScheduleRequest",
     ) -> Optional[JobRole]:
         """Select best role for a work period.
 
@@ -585,13 +585,15 @@ class HeuristicSolver:
         2. Preferred roles
         3. Neutral roles
         4. Avoid roles only if necessary
+
+        Supports time-based caps via request.get_job_cap(slot, role).
         """
         # Priority order for constrained roles
+        # GMD/SR and Exception are staffed first (1 each), rest go to Picking
+        # Staging and Backroom are not prioritized (time-based caps control when they start)
         constrained_priority = [
             JobRole.GMD_SM,
             JobRole.EXCEPTION_SM,
-            JobRole.STAGING,
-            JobRole.BACKROOM,
             JobRole.SR,
         ]
 
@@ -600,10 +602,10 @@ class HeuristicSolver:
             if role not in eligible_roles:
                 continue
 
-            # Check if we can assign this role (under cap for all slots)
+            # Check if we can assign this role (under cap for all slots in period)
             can_assign = True
             for slot in range(period.start_slot, period.end_slot):
-                if slot_states[slot].role_counts[role] >= job_caps.get(role, 999):
+                if slot_states[slot].role_counts[role] >= request.get_job_cap(slot, role):
                     can_assign = False
                     break
 
@@ -621,7 +623,7 @@ class HeuristicSolver:
         for role in eligible_roles:
             can_assign = True
             for slot in range(period.start_slot, period.end_slot):
-                if slot_states[slot].role_counts[role] >= job_caps.get(role, 999):
+                if slot_states[slot].role_counts[role] >= request.get_job_cap(slot, role):
                     can_assign = False
                     break
             if can_assign:
