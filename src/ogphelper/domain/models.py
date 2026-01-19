@@ -272,6 +272,59 @@ class Preference(Enum):
     PREFER = 1  # Would like to do this role
 
 
+@dataclass
+class SlotRangeCaps:
+    """Job caps for a specific range of time slots.
+
+    Allows different staffing configurations for different times of day.
+    For example, 5AM might have reduced staffing while 6AM onwards uses normal caps.
+
+    Attributes:
+        start_slot: First slot where these caps apply (inclusive).
+        end_slot: Last slot where these caps apply (exclusive).
+        job_caps: Maximum associates per role for slots in this range.
+        label: Human-readable label (e.g., "5AM Hour").
+    """
+
+    start_slot: int
+    end_slot: int
+    job_caps: dict[JobRole, int]
+    label: str = ""
+
+    def contains_slot(self, slot: int) -> bool:
+        """Check if a slot falls within this range."""
+        return self.start_slot <= slot < self.end_slot
+
+    def get_cap(self, role: JobRole) -> int:
+        """Get the cap for a specific role, defaulting to 999 if not specified."""
+        return self.job_caps.get(role, 999)
+
+    @classmethod
+    def create_5am_staffing(cls) -> "SlotRangeCaps":
+        """Create 5AM staffing configuration.
+
+        For the 5AM hour (5:00-5:59 AM, slots 0-3):
+        - No backroom
+        - No staging
+        - 1 exception
+        - 1 GMD or SR (combined)
+        - Rest picking
+        """
+        return cls(
+            start_slot=0,
+            end_slot=4,  # Slots 0-3 (5:00 AM - 5:59 AM)
+            job_caps={
+                JobRole.PICKING: 999,  # Unlimited
+                JobRole.GMD_SM: 1,     # 1 GMD/SR combined
+                JobRole.SR: 0,         # Use GMD_SM slot for SR if needed
+                JobRole.EXCEPTION_SM: 1,
+                JobRole.STAGING: 0,
+                JobRole.BACKROOM: 0,
+            },
+            label="5AM Hour",
+        )
+
+
 @dataclass(frozen=True)
 class TimeSlot:
     """Represents a discrete time slot in the schedule.
@@ -571,6 +624,26 @@ class ScheduleRequest:
     is_busy_day: bool = False
     shift_block_configs: Optional[list[ShiftBlockConfig]] = None
     shift_start_configs: Optional[list[ShiftStartConfig]] = None
+    slot_range_caps: Optional[list["SlotRangeCaps"]] = None
+
+    def get_slot_range_caps_for_slot(self, slot: int) -> Optional["SlotRangeCaps"]:
+        """Get the slot range caps for a given slot, if any."""
+        if not self.slot_range_caps:
+            return None
+        for caps in self.slot_range_caps:
+            if caps.contains_slot(slot):
+                return caps
+        return None
+
+    def get_job_cap_at_slot(self, slot: int, role: JobRole) -> int:
+        """Get the job cap for a role at a specific slot.
+
+        Uses slot-specific caps if available, otherwise falls back to global caps.
+        """
+        slot_caps = self.get_slot_range_caps_for_slot(slot)
+        if slot_caps:
+            return slot_caps.get_cap(role)
+        return self.job_caps.get(role, 999)
 
     def get_shift_block_for_slot(self, slot: int) -> Optional[ShiftBlockConfig]:
         """Get the shift block configuration for a given start slot."""
@@ -726,6 +799,7 @@ class WeeklyScheduleRequest:
     fairness_config: FairnessConfig = field(default_factory=FairnessConfig)
     shift_block_configs: Optional[list[ShiftBlockConfig]] = None
     shift_start_configs: Optional[list[ShiftStartConfig]] = None
+    slot_range_caps: Optional[list[SlotRangeCaps]] = None
 
     @property
     def total_slots_per_day(self) -> int:
@@ -763,6 +837,7 @@ class WeeklyScheduleRequest:
             is_busy_day=self.is_busy_day(schedule_date),
             shift_block_configs=self.shift_block_configs,
             shift_start_configs=self.shift_start_configs,
+            slot_range_caps=self.slot_range_caps,
         )
 
 

@@ -22,6 +22,7 @@ from ogphelper.domain.models import (
     ShiftBlockConfig,
     ShiftBlockType,
     ShiftStartConfig,
+    SlotRangeCaps,
 )
 from ogphelper.domain.policies import (
     BreakPolicy,
@@ -181,7 +182,8 @@ class HeuristicSolver:
 
             # Assign job roles
             job_assignments = self._assign_roles(
-                candidate, assignment, associate, slot_states, request.job_caps
+                candidate, assignment, associate, slot_states, request.job_caps,
+                request.slot_range_caps
             )
             assignment.job_assignments = job_assignments
 
@@ -503,6 +505,7 @@ class HeuristicSolver:
         associate: Associate,
         slot_states: list[SlotState],
         job_caps: dict[JobRole, int],
+        slot_range_caps: Optional[list[SlotRangeCaps]] = None,
     ) -> list[JobAssignment]:
         """Assign job roles for each work period in the shift.
 
@@ -510,6 +513,7 @@ class HeuristicSolver:
         1. Fill constrained roles first (GMD, Exception, Staging, Backroom)
         2. Assign Picking as overflow
         3. Respect caps and eligibility
+        4. Use slot-specific caps when available (e.g., 5AM staffing)
         """
         eligible_roles = associate.eligible_roles()
         if not eligible_roles:
@@ -523,7 +527,8 @@ class HeuristicSolver:
         for period in work_periods:
             # For simplicity, assign one role per work period
             role = self._select_role_for_period(
-                period, eligible_roles, associate, slot_states, job_caps
+                period, eligible_roles, associate, slot_states, job_caps,
+                slot_range_caps
             )
             if role:
                 assignments.append(JobAssignment(role=role, block=period))
@@ -570,6 +575,23 @@ class HeuristicSolver:
 
         return periods
 
+    def _get_cap_for_slot(
+        self,
+        slot: int,
+        role: JobRole,
+        job_caps: dict[JobRole, int],
+        slot_range_caps: Optional[list[SlotRangeCaps]] = None,
+    ) -> int:
+        """Get the job cap for a role at a specific slot.
+
+        Uses slot-specific caps if available, otherwise falls back to global caps.
+        """
+        if slot_range_caps:
+            for caps in slot_range_caps:
+                if caps.contains_slot(slot):
+                    return caps.get_cap(role)
+        return job_caps.get(role, 999)
+
     def _select_role_for_period(
         self,
         period: ScheduleBlock,
@@ -577,6 +599,7 @@ class HeuristicSolver:
         associate: Associate,
         slot_states: list[SlotState],
         job_caps: dict[JobRole, int],
+        slot_range_caps: Optional[list[SlotRangeCaps]] = None,
     ) -> Optional[JobRole]:
         """Select best role for a work period.
 
@@ -585,6 +608,8 @@ class HeuristicSolver:
         2. Preferred roles
         3. Neutral roles
         4. Avoid roles only if necessary
+
+        Uses slot-specific caps when available (e.g., 5AM has different staffing).
         """
         # Priority order for constrained roles
         constrained_priority = [
@@ -603,7 +628,8 @@ class HeuristicSolver:
             # Check if we can assign this role (under cap for all slots)
             can_assign = True
             for slot in range(period.start_slot, period.end_slot):
-                if slot_states[slot].role_counts[role] >= job_caps.get(role, 999):
+                cap = self._get_cap_for_slot(slot, role, job_caps, slot_range_caps)
+                if slot_states[slot].role_counts[role] >= cap:
                     can_assign = False
                     break
 
@@ -621,7 +647,8 @@ class HeuristicSolver:
         for role in eligible_roles:
             can_assign = True
             for slot in range(period.start_slot, period.end_slot):
-                if slot_states[slot].role_counts[role] >= job_caps.get(role, 999):
+                cap = self._get_cap_for_slot(slot, role, job_caps, slot_range_caps)
+                if slot_states[slot].role_counts[role] >= cap:
                     can_assign = False
                     break
             if can_assign:
