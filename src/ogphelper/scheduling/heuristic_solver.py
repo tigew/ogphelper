@@ -145,6 +145,11 @@ class HeuristicSolver:
             start_state,
         )
 
+        # Re-sort selected shifts by start time for role assignment
+        # This ensures earlier starters (5AM) get specialized roles first,
+        # enabling proper ramping (1 new per hour) for GMD/SM, Exception/SM, etc.
+        selected_shifts.sort(key=lambda c: c.start_slot)
+
         # Step 2-4: For each selected shift, place lunch, breaks, and assign roles
         for candidate in selected_shifts:
             associate = associates_map[candidate.associate_id]
