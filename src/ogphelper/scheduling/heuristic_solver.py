@@ -514,6 +514,8 @@ class HeuristicSolver:
         2. Assign Picking as overflow
         3. Respect caps and eligibility
         4. Use slot-specific caps when available (e.g., 5AM staffing)
+        5. For 5AM starters (shift starts in slots 0-3), preserve initial role
+           throughout the entire shift to maintain consistency.
         """
         eligible_roles = associate.eligible_roles()
         if not eligible_roles:
@@ -524,17 +526,36 @@ class HeuristicSolver:
 
         assignments = []
 
+        # Check if this is a 5AM starter (shift starts in slots 0-3)
+        is_5am_starter = candidate.start_slot < 4
+        initial_role: Optional[JobRole] = None
+
         for period in work_periods:
-            # For simplicity, assign one role per work period
-            role = self._select_role_for_period(
-                period, eligible_roles, associate, slot_states, job_caps,
-                slot_range_caps
-            )
+            role: Optional[JobRole] = None
+
+            # For 5AM starters, try to preserve the initial role
+            if is_5am_starter and initial_role is not None:
+                role = self._try_preserve_role(
+                    initial_role, period, eligible_roles, slot_states,
+                    job_caps, slot_range_caps
+                )
+
+            # If not preserving (or couldn't preserve), select normally
+            if role is None:
+                role = self._select_role_for_period(
+                    period, eligible_roles, associate, slot_states, job_caps,
+                    slot_range_caps
+                )
+
             if role:
                 assignments.append(JobAssignment(role=role, block=period))
                 # Update slot states
                 for slot in range(period.start_slot, period.end_slot):
                     slot_states[slot].role_counts[role] += 1
+
+                # Track initial role for 5AM starters
+                if is_5am_starter and initial_role is None:
+                    initial_role = role
 
         return assignments
 
@@ -591,6 +612,32 @@ class HeuristicSolver:
                 if caps.contains_slot(slot):
                     return caps.get_cap(role)
         return job_caps.get(role, 999)
+
+    def _try_preserve_role(
+        self,
+        role: JobRole,
+        period: ScheduleBlock,
+        eligible_roles: set[JobRole],
+        slot_states: list[SlotState],
+        job_caps: dict[JobRole, int],
+        slot_range_caps: Optional[list[SlotRangeCaps]] = None,
+    ) -> Optional[JobRole]:
+        """Try to preserve a specific role for a work period.
+
+        Used for 5AM starters to maintain their initial job assignment
+        throughout the shift. Returns the role if it can be assigned,
+        or None if capacity constraints prevent it.
+        """
+        if role not in eligible_roles:
+            return None
+
+        # Check if we can assign this role (under cap for all slots)
+        for slot in range(period.start_slot, period.end_slot):
+            cap = self._get_cap_for_slot(slot, role, job_caps, slot_range_caps)
+            if slot_states[slot].role_counts[role] >= cap:
+                return None
+
+        return role
 
     def _select_role_for_period(
         self,
