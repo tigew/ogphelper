@@ -581,10 +581,10 @@ class HeuristicSolver:
         """Select best role for a work period.
 
         Priority:
-        1. Constrained roles that need staffing (under cap)
-        2. Preferred roles
-        3. Neutral roles
-        4. Avoid roles only if necessary
+        1. Constrained roles with 0 staffing (meet minimum of 1 first)
+        2. Constrained roles under cap (fill additional slots)
+        3. Picking as default
+        4. Any eligible role as last resort
         """
         # Priority order for constrained roles
         constrained_priority = [
@@ -595,7 +595,30 @@ class HeuristicSolver:
             JobRole.SR,
         ]
 
-        # Check if any constrained role needs staffing
+        # First pass: prioritize roles that have 0 staffing (need minimum of 1)
+        for role in constrained_priority:
+            if role not in eligible_roles:
+                continue
+
+            # Check if this role has 0 staffing in any slot of the period
+            needs_minimum = False
+            can_assign = True
+            for slot in range(period.start_slot, period.end_slot):
+                current_count = slot_states[slot].role_counts[role]
+                cap = job_caps.get(role, 999)
+                if current_count == 0:
+                    needs_minimum = True
+                if current_count >= cap:
+                    can_assign = False
+                    break
+
+            if needs_minimum and can_assign:
+                # Check preference - don't force avoid roles for constrained
+                pref = associate.get_preference(role)
+                if pref != Preference.AVOID:
+                    return role
+
+        # Second pass: fill roles that are under cap (already have minimum)
         for role in constrained_priority:
             if role not in eligible_roles:
                 continue
