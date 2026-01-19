@@ -306,7 +306,7 @@ class SlotRangeCaps:
         For the 5AM hour (5:00-5:59 AM, slots 0-3):
         - 1 GMD/SM
         - 1 Exception/SM
-        - 1 Staging
+        - 0 Staging (doesn't start until 6AM)
         - 1 SR
         - No backroom (ramps later)
         - Rest picking
@@ -318,7 +318,7 @@ class SlotRangeCaps:
                 JobRole.PICKING: 999,  # Unlimited
                 JobRole.GMD_SM: 1,
                 JobRole.EXCEPTION_SM: 1,
-                JobRole.STAGING: 1,
+                JobRole.STAGING: 0,  # Staging doesn't start until 6AM
                 JobRole.SR: 1,
                 JobRole.BACKROOM: 0,
             },
@@ -332,7 +332,7 @@ class SlotRangeCaps:
         For the 6AM hour (6:00-6:59 AM, slots 4-7):
         - 2 GMD/SM
         - 2 Exception/SM
-        - 2 Staging
+        - 1 Staging (first staging - starts at 6AM)
         - 2 SR
         - 4 backroom (ramping up)
         - Rest picking
@@ -344,7 +344,7 @@ class SlotRangeCaps:
                 JobRole.PICKING: 999,  # Unlimited
                 JobRole.GMD_SM: 2,
                 JobRole.EXCEPTION_SM: 2,
-                JobRole.STAGING: 2,
+                JobRole.STAGING: 1,  # First staging starts at 6AM
                 JobRole.SR: 2,
                 JobRole.BACKROOM: 4,
             },
@@ -352,18 +352,49 @@ class SlotRangeCaps:
         )
 
     @classmethod
+    def create_7am_staffing(cls) -> "SlotRangeCaps":
+        """Create 7AM staffing configuration (third hour ramping).
+
+        For the 7AM hour (7:00-7:59 AM, slots 8-11):
+        - 3 GMD/SM (full cap)
+        - 3 Exception/SM (full cap)
+        - 2 Staging (second staging)
+        - 3 SR (full cap)
+        - 8 backroom (full cap)
+        - Rest picking
+        """
+        return cls(
+            start_slot=8,
+            end_slot=12,  # Slots 8-11 (7:00 AM - 7:59 AM)
+            job_caps={
+                JobRole.PICKING: 999,  # Unlimited
+                JobRole.GMD_SM: 3,  # Full cap
+                JobRole.EXCEPTION_SM: 3,  # Full cap
+                JobRole.STAGING: 2,  # Second staging
+                JobRole.SR: 3,  # Full cap
+                JobRole.BACKROOM: 8,  # Full cap
+            },
+            label="7AM Hour",
+        )
+
+    @classmethod
     def create_default_ramping(cls) -> list["SlotRangeCaps"]:
         """Create default ramping caps for specialized roles.
 
         Returns slot range caps that gradually increase coverage:
-        - 5AM: 1 each for GMD/SM, Exception/SM, Staging, SR
-        - 6AM: 2 each for GMD/SM, Exception/SM, Staging, SR
-        - 7AM+: Uses global caps (typically 3 each)
+        - 5AM: 1 GMD/SM, 1 Exception/SM, 0 Staging, 1 SR, 0 Backroom
+        - 6AM: 2 GMD/SM, 2 Exception/SM, 1 Staging, 2 SR, 4 Backroom
+        - 7AM: 3 GMD/SM, 3 Exception/SM, 2 Staging, 3 SR, 8 Backroom
+        - 8AM+: Uses global caps (3 each for specialized roles)
 
         This ensures specialized roles ramp up gradually rather than
-        all coming in at once.
+        all coming in at once. Staging starts at 6AM.
         """
-        return [cls.create_5am_staffing(), cls.create_6am_staffing()]
+        return [
+            cls.create_5am_staffing(),
+            cls.create_6am_staffing(),
+            cls.create_7am_staffing(),
+        ]
 
 
 @dataclass(frozen=True)
