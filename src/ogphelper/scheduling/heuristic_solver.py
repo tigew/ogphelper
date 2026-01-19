@@ -592,6 +592,7 @@ class HeuristicSolver:
             JobRole.EXCEPTION_SM,
             JobRole.STAGING,
             JobRole.BACKROOM,
+            JobRole.SR,
         ]
 
         # Check if any constrained role needs staffing
