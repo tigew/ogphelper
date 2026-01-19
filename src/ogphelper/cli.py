@@ -536,6 +536,8 @@ def run_weekly_demo(
     # Note: In realistic mode, shift_start_configs are used to create associates but
     # NOT passed as constraints to the scheduler, since the targets represent total
     # workforce distribution, not per-day constraints (associates have days off)
+    # Also in realistic mode, use high max_hours_variance since "unfairness" is due
+    # to actual availability constraints (built-in days off), not scheduler decisions
     request = WeeklyScheduleRequest(
         start_date=start_date,
         end_date=end_date,
@@ -545,7 +547,7 @@ def run_weekly_demo(
         fairness_config=FairnessConfig(
             weight_hours_balance=0.7,
             weight_days_balance=0.3,
-            max_hours_variance=120.0,  # 2 hours variance allowed
+            max_hours_variance=960.0 if realistic else 120.0,  # 16h variance for realistic, 2h otherwise
         ),
         shift_block_configs=shift_block_configs,
         shift_start_configs=None if realistic else shift_start_configs,
