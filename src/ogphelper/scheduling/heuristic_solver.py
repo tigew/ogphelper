@@ -374,7 +374,7 @@ class HeuristicSolver:
 
         Prefers positions where:
         - Coverage is high (less impact when one person leaves)
-        - Others are already on lunch (coordinated lunches)
+        - Fewer others are already on lunch (stagger lunches for coverage)
         """
         score = 0.0
 
@@ -385,8 +385,9 @@ class HeuristicSolver:
             # Prefer high coverage slots
             score += coverage * 0.5
 
-            # Small bonus for coordinating with existing lunches
-            score += lunch_count * 0.2
+            # Penalize slots where many are already on lunch
+            # This ensures lunches are staggered across associates
+            score -= lunch_count * 3.0
 
         return score
 
@@ -484,13 +485,16 @@ class HeuristicSolver:
                 continue
 
             # Score this position
-            # Strongly prefer the exact midpoint with heavy distance penalty
+            # Balance distance from target with break distribution
             score = 0.0
             for slot in range(start, end):
-                # Prefer high coverage (less impact)
+                # Prefer high coverage (less impact when taking break)
                 score += slot_states[slot].on_floor_count * 0.1
-            # Heavy penalty for distance from midpoint (prioritize exact placement)
-            score -= abs(offset) * 10.0
+                # Strong penalty for slots where others are already on break
+                # This ensures breaks are staggered across associates
+                score -= slot_states[slot].on_break_count * 5.0
+            # Moderate penalty for distance from target (allows spreading)
+            score -= abs(offset) * 2.0
 
             if score > best_score:
                 best_score = score
