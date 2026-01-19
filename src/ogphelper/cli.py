@@ -328,8 +328,12 @@ def create_realistic_associates(
 
             # Select days off pattern - rotate through patterns to ensure coverage
             # Use index-based selection first, then randomize for duplicates
-            pattern_idx = associate_idx % len(days_off_patterns)
-            preferred_days_off = days_off_patterns[pattern_idx]
+            # Skip days-off patterns for single-day schedules so all associates are available
+            if len(schedule_dates) == 1:
+                preferred_days_off = []  # No days off for single-day demo
+            else:
+                pattern_idx = associate_idx % len(days_off_patterns)
+                preferred_days_off = days_off_patterns[pattern_idx]
 
             cannot_do = rng.choice(role_restrictions)
             preferences = rng.choice(preference_combos)
