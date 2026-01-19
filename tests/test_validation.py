@@ -344,9 +344,9 @@ class TestScheduleValidator:
             for i in range(5)
         ]
 
-        # Cap is 2 for GMD_SM, but we assign 3
+        # Cap is 3 for GMD_SM, but we assign 4
         assignments = {}
-        for assoc in associates[:3]:
+        for assoc in associates[:4]:
             assignments[assoc.id] = ShiftAssignment(
                 associate_id=assoc.id,
                 schedule_date=date(2024, 1, 15),

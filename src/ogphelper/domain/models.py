@@ -614,11 +614,11 @@ class ScheduleRequest:
     job_caps: dict[JobRole, int] = field(
         default_factory=lambda: {
             JobRole.PICKING: 999,  # Effectively unlimited
-            JobRole.GMD_SM: 2,
-            JobRole.EXCEPTION_SM: 2,
-            JobRole.STAGING: 2,
+            JobRole.GMD_SM: 3,  # Beginning, middle, end coverage
+            JobRole.EXCEPTION_SM: 3,  # Beginning, middle, end coverage
+            JobRole.STAGING: 3,  # Beginning, middle, end coverage
             JobRole.BACKROOM: 8,
-            JobRole.SR: 2,  # Seasonal and Regulated
+            JobRole.SR: 3,  # Seasonal and Regulated - beginning, middle, end
         }
     )
     is_busy_day: bool = False
