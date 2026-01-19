@@ -421,8 +421,8 @@ def run_demo(
     time_based_caps = None
     if realistic:
         time_based_caps = {}
-        # 5-7 AM (slots 0-8): No staging/backroom, 1 GMD, 1 Exception, 1 SR
-        for slot in range(8):
+        # 5-6 AM (slots 0-4): No staging/backroom, 1 GMD, 1 Exception, 1 SR
+        for slot in range(4):
             time_based_caps[slot] = {
                 JobRole.STAGING: 0,
                 JobRole.BACKROOM: 0,
@@ -430,20 +430,29 @@ def run_demo(
                 JobRole.EXCEPTION_SM: 1,
                 JobRole.SR: 1,
             }
-        # 7-8 AM (slots 8-12): Start easing in - still no staging/backroom
-        for slot in range(8, 12):
-            time_based_caps[slot] = {
-                JobRole.STAGING: 0,
-                JobRole.BACKROOM: 0,
-                JobRole.GMD_SM: 1,
-                JobRole.EXCEPTION_SM: 1,
-                JobRole.SR: 1,
-            }
-        # 8-9 AM (slots 12-16): Allow 1 staging, still no backroom
-        for slot in range(12, 16):
+        # 6-7 AM (slots 4-8): Start ramping staging/backroom
+        for slot in range(4, 8):
             time_based_caps[slot] = {
                 JobRole.STAGING: 1,
-                JobRole.BACKROOM: 0,
+                JobRole.BACKROOM: 1,
+                JobRole.GMD_SM: 1,
+                JobRole.EXCEPTION_SM: 1,
+                JobRole.SR: 1,
+            }
+        # 7-8 AM (slots 8-12): Continue ramping
+        for slot in range(8, 12):
+            time_based_caps[slot] = {
+                JobRole.STAGING: 1,
+                JobRole.BACKROOM: 2,
+                JobRole.GMD_SM: 1,
+                JobRole.EXCEPTION_SM: 1,
+                JobRole.SR: 1,
+            }
+        # 8-9 AM (slots 12-16): More ramping toward full staffing
+        for slot in range(12, 16):
+            time_based_caps[slot] = {
+                JobRole.STAGING: 2,
+                JobRole.BACKROOM: 4,
                 JobRole.GMD_SM: 1,
                 JobRole.EXCEPTION_SM: 1,
                 JobRole.SR: 1,

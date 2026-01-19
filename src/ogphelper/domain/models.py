@@ -564,11 +564,11 @@ class ScheduleRequest:
     job_caps: dict[JobRole, int] = field(
         default_factory=lambda: {
             JobRole.PICKING: 999,  # Effectively unlimited
-            JobRole.GMD_SM: 1,
-            JobRole.EXCEPTION_SM: 1,
+            JobRole.GMD_SM: 2,
+            JobRole.EXCEPTION_SM: 2,
             JobRole.STAGING: 2,
-            JobRole.BACKROOM: 2,
-            JobRole.SR: 1,
+            JobRole.BACKROOM: 8,
+            JobRole.SR: 2,
         }
     )
     time_based_job_caps: Optional[dict[int, dict[JobRole, int]]] = None
@@ -736,11 +736,11 @@ class WeeklyScheduleRequest:
     job_caps: dict[JobRole, int] = field(
         default_factory=lambda: {
             JobRole.PICKING: 999,
-            JobRole.GMD_SM: 1,
-            JobRole.EXCEPTION_SM: 1,
+            JobRole.GMD_SM: 2,
+            JobRole.EXCEPTION_SM: 2,
             JobRole.STAGING: 2,
-            JobRole.BACKROOM: 2,
-            JobRole.SR: 1,
+            JobRole.BACKROOM: 8,
+            JobRole.SR: 2,
         }
     )
     time_based_job_caps: Optional[dict[int, dict[JobRole, int]]] = None
