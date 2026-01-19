@@ -670,6 +670,17 @@ class PDFGenerator:
             )
             y -= 15
 
+        # Notes section
+        y -= 20
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(self.margin, y, "Notes:")
+        y -= 15
+        c.setFont("Helvetica", 9)
+        c.drawString(
+            self.margin + 20, y,
+            "• GMD/SM, Exception/SM, and S/R associates also count as Pickers when not in their specialized role."
+        )
+
         c.showPage()
 
     def _draw_coverage_chart(
