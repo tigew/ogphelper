@@ -245,8 +245,9 @@ class DefaultBreakPolicy(BreakPolicy):
     min_gap_from_lunch_slots: int = 2
 
     # Maximum variance from ideal midpoint position (in slots)
-    # 2 slots = 30 minutes max variance from the exact midpoint
-    max_break_variance_slots: int = 2
+    # 4 slots = 60 minutes max variance from the exact midpoint
+    # This allows staggering breaks across associates with the same start time
+    max_break_variance_slots: int = 4
 
     def get_break_count(self, work_minutes: int) -> int:
         if work_minutes >= self.two_break_threshold:

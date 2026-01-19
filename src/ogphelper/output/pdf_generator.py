@@ -26,6 +26,7 @@ COLORS = {
     JobRole.EXCEPTION_SM: (0.8, 0.6, 0.2),  # Orange
     JobRole.STAGING: (0.7, 0.4, 0.7),  # Purple
     JobRole.BACKROOM: (0.6, 0.6, 0.6),  # Gray
+    JobRole.SR: (0.2, 0.7, 0.7),  # Teal/Cyan - distinct from other roles
     "lunch": (1.0, 0.9, 0.5),  # Yellow
     "break": (0.9, 0.7, 0.7),  # Light red/pink
     "off_shift": (0.95, 0.95, 0.95),  # Light gray
@@ -573,6 +574,7 @@ class PDFGenerator:
             (JobRole.EXCEPTION_SM, "Exception"),
             (JobRole.STAGING, "Staging"),
             (JobRole.BACKROOM, "Backroom"),
+            (JobRole.SR, "SR"),
             ("lunch", "Lunch"),
             ("break", "Break"),
         ]
