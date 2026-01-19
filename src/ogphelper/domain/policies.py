@@ -169,8 +169,9 @@ class DefaultLunchPolicy(LunchPolicy):
     long_lunch_duration: int = 60
 
     # Window flexibility in minutes
-    normal_day_window: int = 30
-    busy_day_window: int = 60
+    # 60 min (4 slots) allows staggering lunches by a full hour
+    normal_day_window: int = 60
+    busy_day_window: int = 120
 
     def get_lunch_duration(self, work_minutes: int) -> int:
         if work_minutes < self.no_lunch_threshold:

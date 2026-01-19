@@ -374,7 +374,7 @@ class HeuristicSolver:
 
         Prefers positions where:
         - Coverage is high (less impact when one person leaves)
-        - Others are already on lunch (coordinated lunches)
+        - Fewer others are already on lunch (stagger lunches for coverage)
         """
         score = 0.0
 
@@ -385,8 +385,9 @@ class HeuristicSolver:
             # Prefer high coverage slots
             score += coverage * 0.5
 
-            # Small bonus for coordinating with existing lunches
-            score += lunch_count * 0.2
+            # Penalize slots where many are already on lunch
+            # This ensures lunches are staggered across associates
+            score -= lunch_count * 3.0
 
         return score
 
