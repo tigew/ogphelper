@@ -137,7 +137,7 @@ class TestCandidateGenerator:
         for candidate in candidates:
             if candidate.work_minutes < 300:
                 assert candidate.break_count == 0
-            elif candidate.work_minutes < 480:
+            elif candidate.work_minutes < 420:
                 assert candidate.break_count == 1
             else:
                 assert candidate.break_count == 2

@@ -141,16 +141,16 @@ class TestDefaultBreakPolicy:
         assert policy.get_break_count(299) == 0  # Just under 5 hours
 
     def test_one_break_at_5_hours(self):
-        """Work >= 5 hours and < 8 hours should get 1 break."""
+        """Work >= 5 hours and < 7 hours should get 1 break."""
         policy = DefaultBreakPolicy()
         assert policy.get_break_count(300) == 1  # 5 hours
         assert policy.get_break_count(360) == 1  # 6 hours
-        assert policy.get_break_count(420) == 1  # 7 hours
-        assert policy.get_break_count(479) == 1  # Just under 8 hours
+        assert policy.get_break_count(419) == 1  # Just under 7 hours
 
-    def test_two_breaks_at_8_hours(self):
-        """Work >= 8 hours should get 2 breaks."""
+    def test_two_breaks_at_7_hours(self):
+        """Work >= 7 hours should get 2 breaks."""
         policy = DefaultBreakPolicy()
+        assert policy.get_break_count(420) == 2  # 7 hours
         assert policy.get_break_count(480) == 2  # 8 hours
         assert policy.get_break_count(500) == 2  # Over 8 hours
 

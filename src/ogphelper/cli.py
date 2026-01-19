@@ -318,9 +318,9 @@ def create_realistic_associates(
             if associate_idx >= len(names):
                 name = f"{name}{associate_idx // len(names) + 1}"
 
-            # Calculate shift end (8 hours = 32 slots for 15-min slots)
+            # Calculate shift end (8 hours work + 1 hour lunch = 36 slots for 15-min slots)
             start_slot = cfg.start_slot
-            end_slot = min(start_slot + 32, 68)  # Cap at 10 PM
+            end_slot = min(start_slot + 36, 68)  # Cap at 10 PM
 
             # For closers, extend availability to end of day
             if start_slot >= 36:  # 2 PM or later

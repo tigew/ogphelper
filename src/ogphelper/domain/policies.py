@@ -227,7 +227,7 @@ class DefaultBreakPolicy(BreakPolicy):
 
     # Thresholds in minutes
     one_break_threshold: int = 300  # 5 hours
-    two_break_threshold: int = 480  # 8 hours
+    two_break_threshold: int = 420  # 7 hours
 
     # Break duration in minutes
     break_duration: int = 15

@@ -152,5 +152,5 @@ class TestJobRoleEnum:
         assert JobRole.BACKROOM in roles
 
     def test_role_count(self):
-        """Should have exactly 5 roles."""
-        assert len(JobRole) == 5
+        """Should have exactly 6 roles."""
+        assert len(JobRole) == 6
