@@ -587,11 +587,11 @@ class HeuristicSolver:
         4. Avoid roles only if necessary
         """
         # Priority order for constrained roles
+        # GMD/SR and Exception are staffed first (1 each), rest go to Picking
+        # Staging and Backroom are not prioritized (caps are 0 for morning)
         constrained_priority = [
             JobRole.GMD_SM,
             JobRole.EXCEPTION_SM,
-            JobRole.STAGING,
-            JobRole.BACKROOM,
             JobRole.SR,
         ]
 

@@ -333,12 +333,17 @@ class DemandProfile:
 
     @classmethod
     def create_weekday_profile(cls) -> "DemandProfile":
-        """Create a typical weekday demand profile."""
+        """Create a typical weekday demand profile.
+
+        Role staffing eases into needs:
+        - 5AM: 1 GMD, 1 Exception, rest picking (no staging/backroom)
+        - Gradually increase support roles as day progresses
+        """
         return cls(
             name="weekday",
-            description="Standard weekday demand pattern",
+            description="Standard weekday demand pattern with gradual role ramp-up",
             hourly_pattern={
-                5: 2,   # Early morning - light staff
+                5: 2,   # Early morning - light staff (1 GMD/SR, 1 Exception, rest picking)
                 6: 3,
                 7: 5,   # Morning ramp-up
                 8: 7,
@@ -356,6 +361,33 @@ class DemandProfile:
                 20: 4,
                 21: 3,   # Late evening
             },
+            role_patterns={
+                # GMD staffing: 1 person from open, stays at 1
+                JobRole.GMD_SM: {
+                    5: 1, 6: 1, 7: 1, 8: 1, 9: 1, 10: 1, 11: 1,
+                    12: 1, 13: 1, 14: 1, 15: 1, 16: 1, 17: 1, 18: 1, 19: 1, 20: 1, 21: 1,
+                },
+                # Exception staffing: 1 person from open, stays at 1
+                JobRole.EXCEPTION_SM: {
+                    5: 1, 6: 1, 7: 1, 8: 1, 9: 1, 10: 1, 11: 1,
+                    12: 1, 13: 1, 14: 1, 15: 1, 16: 1, 17: 1, 18: 1, 19: 1, 20: 1, 21: 1,
+                },
+                # SR staffing: 1 person from open, stays at 1
+                JobRole.SR: {
+                    5: 1, 6: 1, 7: 1, 8: 1, 9: 1, 10: 1, 11: 1,
+                    12: 1, 13: 1, 14: 1, 15: 1, 16: 1, 17: 1, 18: 1, 19: 1, 20: 1, 21: 1,
+                },
+                # No staging in morning - ease into needs
+                JobRole.STAGING: {
+                    5: 0, 6: 0, 7: 0, 8: 0, 9: 0, 10: 0, 11: 0,
+                    12: 0, 13: 0, 14: 0, 15: 0, 16: 0, 17: 0, 18: 0, 19: 0, 20: 0, 21: 0,
+                },
+                # No backroom - ease into needs
+                JobRole.BACKROOM: {
+                    5: 0, 6: 0, 7: 0, 8: 0, 9: 0, 10: 0, 11: 0,
+                    12: 0, 13: 0, 14: 0, 15: 0, 16: 0, 17: 0, 18: 0, 19: 0, 20: 0, 21: 0,
+                },
+            },
             priority_windows=[
                 (10, 12, DemandPriority.HIGH),
                 (14, 16, DemandPriority.HIGH),
@@ -364,10 +396,15 @@ class DemandProfile:
 
     @classmethod
     def create_weekend_profile(cls) -> "DemandProfile":
-        """Create a typical weekend demand profile."""
+        """Create a typical weekend demand profile.
+
+        Role staffing eases into needs:
+        - 5AM: 1 GMD, 1 Exception, rest picking (no staging/backroom)
+        - Gradually increase support roles as day progresses
+        """
         return cls(
             name="weekend",
-            description="Weekend demand pattern with later peak",
+            description="Weekend demand pattern with later peak and gradual role ramp-up",
             hourly_pattern={
                 5: 1,
                 6: 2,
@@ -386,6 +423,33 @@ class DemandProfile:
                 19: 6,
                 20: 4,
                 21: 2,
+            },
+            role_patterns={
+                # GMD staffing: 1 person from open, stays at 1
+                JobRole.GMD_SM: {
+                    5: 1, 6: 1, 7: 1, 8: 1, 9: 1, 10: 1, 11: 1,
+                    12: 1, 13: 1, 14: 1, 15: 1, 16: 1, 17: 1, 18: 1, 19: 1, 20: 1, 21: 1,
+                },
+                # Exception staffing: 1 person from open, stays at 1
+                JobRole.EXCEPTION_SM: {
+                    5: 1, 6: 1, 7: 1, 8: 1, 9: 1, 10: 1, 11: 1,
+                    12: 1, 13: 1, 14: 1, 15: 1, 16: 1, 17: 1, 18: 1, 19: 1, 20: 1, 21: 1,
+                },
+                # SR staffing: 1 person from open, stays at 1
+                JobRole.SR: {
+                    5: 1, 6: 1, 7: 1, 8: 1, 9: 1, 10: 1, 11: 1,
+                    12: 1, 13: 1, 14: 1, 15: 1, 16: 1, 17: 1, 18: 1, 19: 1, 20: 1, 21: 1,
+                },
+                # No staging - ease into needs
+                JobRole.STAGING: {
+                    5: 0, 6: 0, 7: 0, 8: 0, 9: 0, 10: 0, 11: 0,
+                    12: 0, 13: 0, 14: 0, 15: 0, 16: 0, 17: 0, 18: 0, 19: 0, 20: 0, 21: 0,
+                },
+                # No backroom - ease into needs
+                JobRole.BACKROOM: {
+                    5: 0, 6: 0, 7: 0, 8: 0, 9: 0, 10: 0, 11: 0,
+                    12: 0, 13: 0, 14: 0, 15: 0, 16: 0, 17: 0, 18: 0, 19: 0, 20: 0, 21: 0,
+                },
             },
             priority_windows=[
                 (11, 15, DemandPriority.HIGH),

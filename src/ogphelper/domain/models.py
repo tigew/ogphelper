@@ -561,11 +561,11 @@ class ScheduleRequest:
     job_caps: dict[JobRole, int] = field(
         default_factory=lambda: {
             JobRole.PICKING: 999,  # Effectively unlimited
-            JobRole.GMD_SM: 2,
-            JobRole.EXCEPTION_SM: 2,
-            JobRole.STAGING: 2,
-            JobRole.BACKROOM: 8,
-            JobRole.SR: 2,  # Seasonal and Regulated
+            JobRole.GMD_SM: 1,
+            JobRole.EXCEPTION_SM: 1,
+            JobRole.STAGING: 0,  # No staging in morning - ease into needs
+            JobRole.BACKROOM: 0,  # No backroom in morning - ease into needs
+            JobRole.SR: 1,  # Seasonal and Regulated
         }
     )
     is_busy_day: bool = False
@@ -713,11 +713,11 @@ class WeeklyScheduleRequest:
     job_caps: dict[JobRole, int] = field(
         default_factory=lambda: {
             JobRole.PICKING: 999,
-            JobRole.GMD_SM: 2,
-            JobRole.EXCEPTION_SM: 2,
-            JobRole.STAGING: 2,
-            JobRole.BACKROOM: 8,
-            JobRole.SR: 2,  # Seasonal and Regulated
+            JobRole.GMD_SM: 1,
+            JobRole.EXCEPTION_SM: 1,
+            JobRole.STAGING: 0,  # No staging in morning - ease into needs
+            JobRole.BACKROOM: 0,  # No backroom in morning - ease into needs
+            JobRole.SR: 1,  # Seasonal and Regulated
         }
     )
     busy_days: set[date] = field(default_factory=set)
