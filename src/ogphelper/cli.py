@@ -418,11 +418,11 @@ def run_demo(
         )
 
     # Create schedule request
-    # In realistic mode, use 5AM staffing configuration
+    # In realistic mode, use ramping configuration for specialized roles
     slot_range_caps = None
     if realistic:
-        slot_range_caps = [SlotRangeCaps.create_5am_staffing()]
-        print(f"  5AM staffing: 1 GMD/SR, 1 Exception, no Staging, no Backroom")
+        slot_range_caps = SlotRangeCaps.create_default_ramping()
+        print(f"  Role ramping: 5AM->6AM->7AM->8AM+ (1 new per hour per role)")
 
     request = ScheduleRequest(
         schedule_date=schedule_date,
@@ -583,11 +583,11 @@ def run_weekly_demo(
         print(f"  Shift block limits: morning={morning_limit or 'unlimited'}, "
               f"day={day_limit or 'unlimited'}, closing={closing_limit or 'unlimited'}")
 
-    # Create 5AM staffing configuration for realistic mode
+    # Create ramping configuration for realistic mode
     slot_range_caps = None
     if realistic:
-        slot_range_caps = [SlotRangeCaps.create_5am_staffing()]
-        print(f"  5AM staffing: 1 GMD/SR, 1 Exception, no Staging, no Backroom")
+        slot_range_caps = SlotRangeCaps.create_default_ramping()
+        print(f"  Role ramping: 5AM->6AM->7AM->8AM+ (1 new per hour per role)")
 
     # Create weekly schedule request
     # Note: In realistic mode, shift_start_configs are used to create associates but

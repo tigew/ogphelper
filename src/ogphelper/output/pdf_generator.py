@@ -651,24 +651,63 @@ class PDFGenerator:
         y -= 15
 
         c.setFont("Helvetica", 9)
+
+        # Roles that also count as pickers
+        picker_roles = {JobRole.PICKING, JobRole.GMD_SM, JobRole.EXCEPTION_SM, JobRole.SR}
+
+        # Store coverage data for combined calculation
+        role_coverages = {}
+
         for role in JobRole:
             role_coverage = [
                 schedule.get_role_coverage_at_slot(slot, role)
                 for slot in range(schedule.total_slots)
             ]
-            # Sample at hourly intervals
-            hourly = role_coverage[::4]
+            role_coverages[role] = role_coverage
             max_count = max(role_coverage) if role_coverage else 0
             avg_count = sum(role_coverage) / len(role_coverage) if role_coverage else 0
 
             c.setFillColorRGB(*COLORS.get(role, (0.5, 0.5, 0.5)))
             c.rect(self.margin + 20, y - 2, 10, 10, fill=1, stroke=1)
             c.setFillColorRGB(0, 0, 0)
+
+            # Mark roles that also count as pickers
+            picker_note = " *" if role in picker_roles and role != JobRole.PICKING else ""
             c.drawString(
                 self.margin + 35, y,
-                f"{role.value}: max {max_count}, avg {avg_count:.1f}"
+                f"{role.value}: max {max_count}, avg {avg_count:.1f}{picker_note}"
             )
             y -= 15
+
+        # Calculate combined picking capacity (Picking + GMD/SM + Exception/SM + S/R)
+        y -= 10
+        c.setFont("Helvetica-Bold", 9)
+        combined_coverage = [
+            sum(role_coverages[role][slot] for role in picker_roles)
+            for slot in range(schedule.total_slots)
+        ]
+        combined_max = max(combined_coverage) if combined_coverage else 0
+        combined_avg = sum(combined_coverage) / len(combined_coverage) if combined_coverage else 0
+
+        c.setFillColorRGB(0.3, 0.6, 0.3)  # Darker green for combined
+        c.rect(self.margin + 20, y - 2, 10, 10, fill=1, stroke=1)
+        c.setFillColorRGB(0, 0, 0)
+        c.drawString(
+            self.margin + 35, y,
+            f"Total Picking Capacity: max {combined_max}, avg {combined_avg:.1f}"
+        )
+        y -= 15
+
+        # Notes section
+        y -= 15
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(self.margin, y, "Notes:")
+        y -= 15
+        c.setFont("Helvetica", 9)
+        c.drawString(
+            self.margin + 20, y,
+            "* GMD/SM, Exception/SM, and S/R also count as Pickers (included in Total Picking Capacity)."
+        )
 
         c.showPage()
 
